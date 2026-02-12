@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 
@@ -250,7 +251,9 @@ async function main() {
   };
 
   console.log("Bundling Remotion project...");
-  const entryPoint = path.resolve(__dirname, "index.ts");
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFilePath);
+  const entryPoint = path.resolve(currentDir, "index.ts");
   const bundled = await bundle({
     entryPoint,
     webpackOverride: (config) => config,
