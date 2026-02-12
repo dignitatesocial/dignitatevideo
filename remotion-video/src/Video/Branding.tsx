@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Img, staticFile, useCurrentFrame, interpolate } from "remotion";
+import { AbsoluteFill, useCurrentFrame, interpolate } from "remotion";
 
 export const Branding: React.FC = () => {
   const frame = useCurrentFrame();
@@ -29,20 +29,15 @@ export const Branding: React.FC = () => {
           position: "absolute",
           top: 40,
           right: 40,
-          opacity: 0.6,
+          opacity: 0.35,
+          color: "#14b8a6",
+          fontFamily: "Inter, sans-serif",
+          fontSize: 26,
+          fontWeight: 700,
+          letterSpacing: 0.5,
         }}
       >
-        <Img
-          src={staticFile("dignitate-logo.png")}
-          style={{
-            width: 80,
-            height: 80,
-            objectFit: "contain",
-          }}
-          onError={() => {
-            // Logo file not found - silently skip
-          }}
-        />
+        Dignitate
       </div>
 
       {/* Bottom teal accent bar */}

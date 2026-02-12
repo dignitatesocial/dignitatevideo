@@ -74,6 +74,11 @@ async function getAudioDuration(filePath: string): Promise<number> {
   return durationSec;
 }
 
+function fileToDataUri(filePath: string, mimeType: string): string {
+  const buffer = fs.readFileSync(filePath);
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
 async function synthesizeVoiceoverElevenLabs(
   text: string,
   voiceId: string,
@@ -181,39 +186,30 @@ async function main() {
   console.log(`Clips: ${input.clipUrls.length}`);
   console.log(`Scenes: ${input.scenes.length}`);
 
+  const remoteClipUrls = (input.clipUrls || [])
+    .map((u) => String(u || "").trim())
+    .filter((u) => /^https?:\/\//i.test(u));
+
+  if (remoteClipUrls.length === 0) {
+    throw new Error("No valid clip URLs were provided");
+  }
+
   // Create temp directory
   const tmpDir = "/tmp/remotion-render";
   fs.mkdirSync(tmpDir, { recursive: true });
-
-  // Download all clips
-  const localClipPaths: string[] = [];
-  for (let i = 0; i < input.clipUrls.length; i++) {
-    const clipPath = path.join(tmpDir, `clip-${i}.mp4`);
-    try {
-      await downloadToFile(input.clipUrls[i], clipPath);
-      localClipPaths.push(clipPath);
-    } catch (err) {
-      console.error(`Failed to download clip ${i}:`, err);
-      // Continue with remaining clips
-    }
-  }
-
-  if (localClipPaths.length === 0) {
-    throw new Error("No clips could be downloaded");
-  }
 
   // Resolve audio source:
   // 1) Use provided audio URL if available.
   // 2) Otherwise synthesize from narrationText + voiceId.
   // 3) Fallback to silent video timing from scene durations.
   const audioPath = path.join(tmpDir, "voiceover.mp3");
-  let resolvedAudioPath = "";
+  let resolvedAudioSrc = "";
   let audioDuration = 0;
 
   if (input.audioUrl) {
     console.log("Using provided audio URL from payload.");
     await downloadToFile(input.audioUrl, audioPath);
-    resolvedAudioPath = audioPath;
+    resolvedAudioSrc = fileToDataUri(audioPath, "audio/mpeg");
     audioDuration = await getAudioDuration(audioPath);
   } else if (input.narrationText) {
     try {
@@ -222,19 +218,19 @@ async function main() {
         input.voiceId || "GoLTMzQJAHarswiHqv3L",
         audioPath
       );
-      resolvedAudioPath = audioPath;
+      resolvedAudioSrc = fileToDataUri(audioPath, "audio/mpeg");
       audioDuration = await getAudioDuration(audioPath);
     } catch (err) {
       console.error("Voice synthesis failed, rendering without voiceover:", err);
     }
   }
 
-  if (!resolvedAudioPath) {
+  if (!resolvedAudioSrc) {
     const sceneBasedDuration = (input.scenes || []).reduce((sum, s) => {
       const d = Number(s?.duration || 0);
       return sum + (Number.isFinite(d) && d > 0 ? d : 5);
     }, 0);
-    audioDuration = Math.max(6, sceneBasedDuration || localClipPaths.length * 5 || 15);
+    audioDuration = Math.max(6, sceneBasedDuration || remoteClipUrls.length * 5 || 15);
     console.log(
       `No audio source available. Rendering silent video with duration ${audioDuration}s based on scene timings.`
     );
@@ -242,8 +238,8 @@ async function main() {
 
   // Build render props with local file paths
   const renderProps = {
-    clipUrls: localClipPaths,
-    audioUrl: resolvedAudioPath,
+    clipUrls: remoteClipUrls,
+    audioUrl: resolvedAudioSrc,
     scenes: input.scenes,
     title: input.title,
     fps: 30,
