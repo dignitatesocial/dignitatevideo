@@ -1,0 +1,34 @@
+name: Cleanup Supabase Videos
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: 'Delete rendered videos older than this many days'
+        required: false
+        default: '7'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cleanup old rendered videos
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET || 'videos' }}
+          SUPABASE_PREFIX: ${{ vars.SUPABASE_VIDEO_PREFIX || 'videos' }}
+          RETENTION_DAYS: ${{ github.event.inputs.retention_days || vars.VIDEO_RETENTION_DAYS || '7' }}
+        run: node .github/scripts/cleanup-supabase-videos.mjs
