@@ -8,6 +8,7 @@ interface RenderInput {
   audioUrl?: string;
   narrationText?: string;
   voiceId?: string;
+  n8nWebhookUrl?: string;
   scenes: Array<{
     narration: string;
     visualPrompt: string;
@@ -17,6 +18,34 @@ interface RenderInput {
   }>;
   title: string;
   chatId: string;
+}
+
+function parseRenderInput(rawInput: string): RenderInput {
+  const parsed = JSON.parse(rawInput);
+  let candidate: any = parsed;
+
+  // repository_dispatch payload is often wrapped for GitHub limits:
+  // client_payload: { job: { ...actual render input... } }
+  if (candidate && typeof candidate === "object" && candidate.job) {
+    candidate = candidate.job;
+  }
+
+  if (candidate && typeof candidate === "object" && typeof candidate.payloadJson === "string") {
+    candidate = JSON.parse(candidate.payloadJson);
+  }
+
+  if (candidate && typeof candidate === "object" && typeof candidate.payloadB64 === "string") {
+    const decoded = Buffer.from(candidate.payloadB64, "base64").toString("utf8");
+    candidate = JSON.parse(decoded);
+  }
+
+  return {
+    ...candidate,
+    clipUrls: Array.isArray(candidate?.clipUrls) ? candidate.clipUrls : [],
+    scenes: Array.isArray(candidate?.scenes) ? candidate.scenes : [],
+    title: String(candidate?.title || "Untitled Video"),
+    chatId: String(candidate?.chatId || ""),
+  } as RenderInput;
 }
 
 async function downloadToFile(url: string, destPath: string): Promise<string> {
@@ -146,7 +175,7 @@ async function main() {
     throw new Error("INPUT_PROPS environment variable is required");
   }
 
-  const input: RenderInput = JSON.parse(rawInput);
+  const input: RenderInput = parseRenderInput(rawInput);
   console.log(`Title: ${input.title}`);
   console.log(`Clips: ${input.clipUrls.length}`);
   console.log(`Scenes: ${input.scenes.length}`);
@@ -258,7 +287,7 @@ async function main() {
   const videoUrl = await uploadToSupabase(outputPath, videoKey);
 
   // Callback to n8n webhook
-  const webhookUrl = process.env.N8N_WEBHOOK_URL;
+  const webhookUrl = String(process.env.N8N_WEBHOOK_URL || input.n8nWebhookUrl || "").trim();
   if (webhookUrl) {
     console.log("Sending callback to n8n...");
     const callbackResponse = await fetch(webhookUrl, {
@@ -287,10 +316,16 @@ main().catch((err) => {
   console.error("Render failed:", err);
 
   // Send failure callback
-  const webhookUrl = process.env.N8N_WEBHOOK_URL;
   const rawInput = process.env.INPUT_PROPS;
-  if (webhookUrl && rawInput) {
-    const input = JSON.parse(rawInput);
+  let parsedInput: RenderInput | null = null;
+  try {
+    parsedInput = rawInput ? parseRenderInput(rawInput) : null;
+  } catch {
+    parsedInput = null;
+  }
+  const webhookUrl = String(process.env.N8N_WEBHOOK_URL || parsedInput?.n8nWebhookUrl || "").trim();
+  if (webhookUrl && parsedInput) {
+    const input = parsedInput;
     fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
