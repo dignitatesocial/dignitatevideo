@@ -149,16 +149,52 @@ async function uploadToSupabase(
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${objectPath}`;
   const fileBuffer = fs.readFileSync(filePath);
 
-  const uploadRes = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceRoleKey}`,
-      apikey: serviceRoleKey,
-      "Content-Type": "video/mp4",
-      "x-upsert": "true",
-    },
-    body: fileBuffer,
-  });
+  const uploadOnce = async () =>
+    fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        "Content-Type": "video/mp4",
+        "x-upsert": "true",
+      },
+      body: fileBuffer,
+    });
+
+  const ensureBucket = async () => {
+    const createRes = await fetch(`${supabaseUrl}/storage/v1/bucket`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: bucket,
+        name: bucket,
+        public: true,
+      }),
+    });
+    if (!createRes.ok && createRes.status !== 409) {
+      const body = await createRes.text().catch(() => "");
+      throw new Error(
+        `Supabase bucket create failed (${createRes.status}): ${body.slice(0, 300)}`
+      );
+    }
+  };
+
+  let uploadRes = await uploadOnce();
+
+  if (!uploadRes.ok && uploadRes.status === 400) {
+    const body = await uploadRes.text().catch(() => "");
+    if (/Bucket not found/i.test(body)) {
+      console.log(`Supabase bucket "${bucket}" missing, creating it now...`);
+      await ensureBucket();
+      uploadRes = await uploadOnce();
+    } else {
+      throw new Error(`Supabase upload failed (${uploadRes.status}): ${body.slice(0, 300)}`);
+    }
+  }
 
   if (!uploadRes.ok) {
     const body = await uploadRes.text().catch(() => "");
