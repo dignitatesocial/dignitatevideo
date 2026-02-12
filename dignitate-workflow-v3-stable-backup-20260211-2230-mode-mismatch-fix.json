@@ -1,0 +1,2670 @@
+{
+  "name": "Dignitate Content Automation (v3.9-direct-after-split-2026-02-10)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ]
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000001",
+      "position": [
+        -688,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000002",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -688,
+        700
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Load conversation history and build LLM context with lightweight memory\nconst update = $input.first().json || {};\nconst telegramMessage = update.message || update.callback_query?.message || {};\nconst message = String(update.message?.text || update.callback_query?.data || '');\nconst chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id || update.callback_query?.from?.id;\nconst messageId = update.message?.message_id || update.callback_query?.message?.message_id || update.callback_query?.id || null;\nconst replyToText = String(telegramMessage.reply_to_message?.text || '').trim();\nconst replyToMessageId = telegramMessage.reply_to_message?.message_id || null;\nconst repliedByBot = Boolean(telegramMessage.reply_to_message?.from?.is_bot);\nconst isSlash = message.trim().startsWith('/');\n\n// If this is a callback query, keep the original message text for fallback parsing\nconst sourceMessageText = String(update.callback_query?.message?.text || '').trim();\nconst sourceMessageId = update.callback_query?.message?.message_id || null;\n\nconst staticData = $getWorkflowStaticData('global');\nif (chatId) staticData.defaultChatId = String(chatId);\nif (!staticData.conversations) staticData.conversations = {};\nif (!staticData.userMemory) staticData.userMemory = {};\n\nconst chatKey = String(chatId || '');\nconst now = Date.now();\nconst TWO_HOURS = 2 * 60 * 60 * 1000;\n\nif (staticData.conversations[chatKey] && (now - staticData.conversations[chatKey].lastActivity) > TWO_HOURS) {\n  delete staticData.conversations[chatKey];\n}\n\nif (!staticData.conversations[chatKey]) {\n  staticData.conversations[chatKey] = { messages: [], lastActivity: now };\n}\n\nconst conv = staticData.conversations[chatKey];\nconv.lastActivity = now;\n\nif (message) {\n  conv.messages.push({ role: 'user', content: message });\n}\n\nif (conv.messages.length > 12) {\n  conv.messages = conv.messages.slice(-12);\n}\n\nconst pending = staticData.pendingContent?.[chatKey] || null;\nconst mem = staticData.userMemory[chatKey] || {};\n\nconst memorySummary = [\n  pending ? `pending_type=${pending.type || 'unknown'}` : 'pending_type=none',\n  pending ? `pending_title=\"${(pending.title || pending.args || 'untitled').replace(/\"/g, \"'\")}\"` : 'pending_title=none',\n  mem.lastAction ? `last_action=${mem.lastAction}` : 'last_action=none',\n  mem.lastTopic ? `last_topic=\"${String(mem.lastTopic).replace(/\"/g, \"'\")}\"` : 'last_topic=none'\n].join('; ');\n\nconst systemPrompt = `You are Dignitate's assistant in Telegram. Dignitate is a UK charity supporting cultural carers in the dementia journey.\n\nBehave like a natural LLM chat assistant: warm, practical, concise, and context-aware.\n- Default to natural conversation, not command-style instructions.\n- Do not mention slash commands unless the user explicitly asks.\n- Keep most replies to 1-3 short sentences.\n- Ask at most one clarifying question only when essential.\n- If user confirms (for example: yes, do it, go ahead, make it), use prior context and proceed.\n\nCAPABILITIES:\n- Create Instagram carousel drafts with generated images\n- Create short-form video drafts\n- Pull latest dementia-care trends\n- Approve/regenerate pending drafts for posting\n\nALWAYS return valid JSON only, no markdown, no extra text:\n{\"reply\":\"assistant reply\",\"action\":{\"type\":\"carousel|video|both|trends|approve|regenerate|status|help|none\",\"topic\":\"topic or empty\"}}\n\nACTION POLICY:\n- If user clearly asks for a carousel, set type=carousel.\n- If user clearly asks for a video/reel/tiktok, set type=video.\n- If user asks for both formats, set type=both.\n- If user asks for trends or what to post now, set type=trends.\n- If user asks to post/approve/publish, set type=approve.\n- If user asks to redo/regenerate/try again, set type=regenerate.\n- If user asks for status/help, set type=status/help.\n- If it is normal chat without execution request, set type=none.\n- When action is carousel/video/both and topic is implied by context, infer topic from context.`;\n\nconst memoryMessage = `Conversation memory: ${memorySummary}`;\n\nconst aiMessages = [\n  { role: 'system', content: systemPrompt },\n  { role: 'system', content: memoryMessage },\n  ...conv.messages\n];\n\nconst aiMessagesJson = JSON.stringify(aiMessages);\n\nreturn [{\n  json: {\n    message,\n    chatId,\n    messageId,\n    replyToText,\n    replyToMessageId,\n    repliedByBot,\n    isSlash,\n    sourceMessageText,\n    sourceMessageId,\n    conversationHistory: conv.messages,\n    aiMessagesJson,\n    memorySummary\n  }\n}];\n"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000003",
+      "name": "Load Chat History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ String($json.isSlash) }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Slash"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000004",
+      "name": "Is Slash Command?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"anthropic/claude-haiku-4.5\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"You create educational Instagram carousel scripts for Dignitate, a UK research-led organisation supporting cultural carers in dementia care. Keep outputs factual, compassionate, and coherent. Return valid JSON only.\"\n    },\n    {\n      role: \"user\",\n      content:\n        \"Topic lock (must stay exact): \" + ($json.args || \"dementia caregiving support in the UK\") +\n        \"\\n\\nResearch summary:\\n\" + ($json.researchSummary || \"No research summary available.\") +\n        \"\\n\\nResearch facts (use these for claims and numbers only):\\n\" + JSON.stringify($json.researchFacts || [], null, 2) +\n        \"\\n\\nPractical actions for carers:\\n\" + JSON.stringify($json.researchActions || [], null, 2) +\n        \"\\n\\nNarrative hints:\\n\" + JSON.stringify($json.narrativeFlow || {}, null, 2) +\n        \"\\n\\nTask: Create a 5-slide carousel with this exact structure:\" +\n        \"\\n1) Cover heading slide\" +\n        \"\\n2) Informative point 1\" +\n        \"\\n3) Informative point 2\" +\n        \"\\n4) Informative point 3\" +\n        \"\\n5) Conclusion slide with key takeaway + next step\" +\n        \"\\nRules:\" +\n        \"\\n- Exactly 5 slides.\" +\n        \"\\n- Slide 1 must be a heading/cover style message (clear title and short supporting line).\" +\n        \"\\n- Slides 2, 3, and 4 must each contain concrete, useful information connected to the same topic.\" +\n        \"\\n- Slide 5 must be a proper conclusion with key takeaway and practical next step for carers.\" +\n        \"\\n- Do not change topic, do not introduce unrelated subtopics.\" +\n        \"\\n- If a number is not present in research facts, do not invent one.\" +\n        \"\\n- Style: factual, non-sensational, supportive, plain English.\" +\n        \"\\n- imagePrompt for each slide must describe ONE clean scene only (no collage/grid/split-screen/multi-panel).\" +\n        \"\\n- imagePrompt must match the same topic and visual world across all slides.\" +\n        \"\\n\\nReturn ONLY valid JSON (no markdown):\" +\n        \"\\n{\\\"title\\\":\\\"...\\\",\\\"slides\\\":[{\\\"text\\\":\\\"...\\\",\\\"imagePrompt\\\":\\\"...\\\"}],\\\"hashtags\\\":[\\\"#dementia\\\"],\\\"caption\\\":\\\"...\\\"}\"\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000007",
+      "name": "OpenRouter - Carousel Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        160
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"anthropic/claude-haiku-4.5\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"Write short-form vertical video scripts for Dignitate, a UK research-led organisation supporting cultural carers in dementia care. Keep outputs factual, compassionate, coherent, and topic-locked. Return strict JSON only.\"\n    },\n    {\n      role: \"user\",\n      content:\n        \"Topic lock (must stay exact): \" + ($json.args || \"signs of caregiver burnout\") +\n        \"\\n\\nResearch source text (use this for claims and numbers only):\\n\" + ($json.research || \"No research available.\") +\n        \"\\n\\nCreator face reference URL: \" + ($json.creatorImageUrl || \"none\") +\n        \"\\n\\nTask: Create one coherent 30-40 second vertical short with exactly 5 connected scene units.\" +\n        \"\\nRules:\" +\n        \"\\n- Stay on ONE topic only (topic lock).\" +\n        \"\\n- Story order must be: hook -> context -> evidence -> practical guidance -> informative finish with CTA.\" +\n        \"\\n- Narration per scene: 14-28 words, plain English, factual, empathetic.\" +\n        \"\\n- If a number is not present in the research source text, do not invent it.\" +\n        \"\\n- Visual prompts must be single-scene only (no collage, no grid, no split-screen, no storyboard, no text overlays).\" +\n        \"\\n- Visual style: photorealistic, natural skin texture, realistic lighting, documentary/editorial realism.\" +\n        \"\\n- If creator face reference URL is provided, keep the same exact face identity across all scenes.\" +\n        \"\\n\\nReturn ONLY valid JSON (no markdown):\" +\n        \"\\n{\\\"title\\\":\\\"...\\\",\\\"hook\\\":{\\\"narration\\\":\\\"...\\\",\\\"visualPrompt\\\":\\\"...\\\"},\\\"scenes\\\":[{\\\"narration\\\":\\\"...\\\",\\\"visualPrompt\\\":\\\"...\\\"}],\\\"cta\\\":{\\\"narration\\\":\\\"...\\\",\\\"visualPrompt\\\":\\\"...\\\"},\\\"hashtags\\\":[\\\"#dementiacare\\\"],\\\"caption\\\":\\\"...\\\"}\"\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000008",
+      "name": "OpenRouter - Video Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        400
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"perplexity/sonar-pro\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a trend analyst for Dignitate, a UK dementia-care organisation supporting cultural carers. Return strict JSON only.\"\n    },\n    {\n      role: \"user\",\n      content:\n        \"Find 12 diverse high-engagement trend topics about dementia care and carers from the last 7 days (prioritize last 72 hours).\" +\n        \" Focus UK first, but include major global developments with clear UK relevance.\" +\n        \" Cover varied areas: policy, clinical research, caregiving practice, social care delivery, community support, legal rights, workforce, prevention, digital health, finance, and lived-experience stories.\" +\n        \" Avoid near-duplicate topics and avoid repeating the same angle.\" +\n        \" Return ONLY JSON array with exactly 12 items and this schema:\" +\n        \" [{\\\"title\\\":\\\"...\\\",\\\"summary\\\":\\\"2-3 sentences\\\",\\\"engagement_score\\\":8,\\\"category\\\":\\\"policy|research|caregiving|community|technology|finance|legal|clinical\\\",\\\"region\\\":\\\"UK|Global-UK\\\"}]\"\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000009",
+      "name": "OpenRouter - Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        640
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "Everything is running smoothly.\\nBuild: v3-stable-2026-02-11-static-inline-buttons-modefix\\n\\nI can research a topic, create carousel or video drafts, pull trends, and post approved drafts.\\n\\nTell me what you want to create, for example: \"Create a carousel about caregiver burnout in South Asian families.\"",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000010",
+      "name": "Status Response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000010",
+      "position": [
+        0,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "I can work like a normal chat assistant.\n\nTry prompts like:\n- Create a carousel about dementia-friendly home routines\n- Make a short video about signs of caregiver burnout\n- What are the latest UK dementia-care trends?\n- This looks good, post it\n- Regenerate this with a more hopeful tone\n\nCreator profile for realistic videos:\n- /setface <public_image_url>\n- /setvoiceid <elevenlabs_voice_id>\n- /creator\n- /commands\n\nAuto mode is currently disabled.\n\nGive me your topic and preferred format, and I will handle the workflow.",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000011",
+      "name": "Help Response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000011",
+      "position": [
+        0,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json || {};\nconst rawContent = response.choices?.[0]?.message?.content || '{}';\nconst content = Array.isArray(rawContent)\n  ? rawContent.map((c) => c?.text || '').join('\\n')\n  : String(rawContent || '{}');\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction sanitizeImagePrompt(text) {\n  let t = clean(text);\n  if (!t) return '';\n  t = t\n    .replace(/#[0-9a-f]{3,8}\\b/gi, '')\n    .replace(/\\b(?:rgb|rgba|hsl|hsla|cmyk)\\s*\\([^)]*\\)/gi, '')\n    .replace(/\\b(?:hex\\s*codes?|hex|palette|swatch(?:es)?|colour\\s*swatch(?:es)?|color\\s*chip(?:s)?|colour\\s*chip(?:s)?|color\\s*bar(?:s)?|colour\\s*bar(?:s)?|legend|style\\s*tile|moodboard|footer\\s*strip(?:s)?|sample\\s*strip)\\b/gi, '')\n    .replace(/\\b(collage|grid|mosaic|split\\s*screen|diptych|triptych|quad\\s*panel|four\\s*panel|multi\\s*panel|storyboard|contact\\s*sheet|comic\\s*panel|tiled?)\\b/gi, '')\n    .replace(/\\s{2,}/g, ' ')\n    .trim();\n\n  const words = t.split(/\\s+/).filter(Boolean);\n  if (words.length < 6) return '';\n  if (/\\b(bottom|footer|strip|swatch|palette|hex|chip|legend|design\\s*board)\\b/i.test(t)) return '';\n\n  return t;\n}\n\nfunction parseJsonLoose(text) {\n  const t = String(text || '').trim();\n  if (!t) return null;\n  const stripped = t\n    .replace(/^\\x60\\x60\\x60json\\s*/i, '')\n    .replace(/^\\x60\\x60\\x60\\s*/i, '')\n    .replace(/\\x60\\x60\\x60$/i, '')\n    .trim();\n  try { return JSON.parse(stripped); } catch (e) {}\n  const start = stripped.indexOf('{');\n  const end = stripped.lastIndexOf('}');\n  if (start >= 0 && end > start) {\n    try { return JSON.parse(stripped.slice(start, end + 1)); } catch (e) {}\n  }\n  return null;\n}\n\nfunction tokenize(text) {\n  const stop = new Set(['the','and','for','with','that','this','from','into','onto','your','about','what','need','know','over','more','less','than','have','has','had','are','was','were','can','will','their','they','them','our','out','now','new','how','why']);\n  return clean(text)\n    .toLowerCase()\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .split(/\\s+/)\n    .filter((w) => w.length > 2 && !stop.has(w));\n}\n\nfunction clampWords(text, minWords, maxWords) {\n  let words = clean(text).split(/\\s+/).filter(Boolean);\n  if (!words.length) words = ['Dementia', 'care', 'support', 'update'];\n  if (words.length > maxWords) words = words.slice(0, maxWords);\n  while (words.length < minWords) words.push('support');\n  return words.join(' ');\n}\n\nfunction ensureSentence(text) {\n  const t = clean(text);\n  if (!t) return t;\n  if (/[.!?]$/.test(t)) return t;\n  return t + '.';\n}\n\nfunction toTitleWords(text, maxWords) {\n  const words = clean(text).split(/\\s+/).filter(Boolean).slice(0, maxWords);\n  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');\n}\n\nlet parsed = parseJsonLoose(content) || {};\n\nlet base = {};\ntry { base = $('Parse Carousel Research').first().json || {}; } catch (e) {}\n\nlet commandData = {};\ntry { commandData = $('Load Chat History').first().json || {}; } catch (e) {}\n\nconst requestedTopic = clean(base.args || base.requestedTopic || commandData.args || parsed.title || 'Dementia care support for UK carers');\nconst topicTokens = tokenize(requestedTopic);\n\nconst facts = Array.isArray(base.researchFacts) ? base.researchFacts : [];\nconst actions = Array.isArray(base.researchActions) ? base.researchActions : [];\nconst narrative = base.narrativeFlow && typeof base.narrativeFlow === 'object' ? base.narrativeFlow : {};\nconst summary = clean(base.researchSummary || '');\n\nconst coverHeading = toTitleWords(parsed.title || requestedTopic || 'Dementia Care Update', 8) || 'Dementia Care Update';\n\nfunction ensureCover(text, fallback) {\n  let t = clean(text || fallback)\n    .replace(/^(why this matters now:|headline:|hook:)/i, '')\n    .trim();\n  if (!t) t = clean(fallback);\n  t = ensureSentence(clampWords(t, 10, 20));\n  return coverHeading + ': ' + t;\n}\n\nfunction ensureInfo(text, fallback, prefix) {\n  let t = clean(text || fallback).trim();\n  if (!t) t = clean(fallback);\n  const p = clean(prefix).toLowerCase();\n  if (!clean(t).toLowerCase().startsWith(p + ':')) {\n    t = prefix + ': ' + t;\n  }\n  t = ensureSentence(clampWords(t, 20, 36));\n  return t;\n}\n\nfunction ensureConclusion(text, fallback) {\n  let t = clean(text || fallback)\n    .replace(/^(what carers can do next:|conclusion:)/i, '')\n    .trim();\n  if (!t) t = clean(fallback);\n  t = clampWords(t, 18, 30);\n  if (!/key takeaway:/i.test(t)) {\n    t += ' Key takeaway: practical, consistent support improves outcomes for carers and families.';\n  }\n  return 'Conclusion: ' + ensureSentence(t);\n}\n\nfunction buildFallbackSlides() {\n  const fact1 = clean(facts[0]?.fact || summary || ('Current topic: ' + requestedTopic));\n  const fact2 = clean(facts[1]?.fact || facts[0]?.fact || 'Recent UK dementia-care evidence highlights significant pressure on carers and services.');\n  const fact3 = clean(facts[2]?.fact || facts[1]?.fact || 'Service variation and support delays are affecting carers in many communities.');\n  const action1 = clean(actions[0] || 'Ask your GP or memory service for a named contact and a written care plan.');\n  const action2 = clean(actions[1] || 'Create one weekly routine for medication, meals, rest, and hydration.');\n  const action3 = clean(actions[2] || 'Track changes and questions so reviews with professionals are more effective.');\n\n  return [\n    {\n      role: 'cover',\n      text: ensureCover((narrative.slide1 ? narrative.slide1 + ' ' : '') + fact1, 'Urgent update for dementia carers in the UK.'),\n      imagePrompt: 'Single UK dementia-care research scene, professional and family carer reviewing one update board in a calm setting, clear cover layout'\n    },\n    {\n      role: 'information',\n      text: ensureInfo((narrative.slide2 ? narrative.slide2 + ' ' : '') + summary, 'Recent service pressure and demand shifts are making dementia support harder to access consistently.', 'What changed'),\n      imagePrompt: 'Single UK healthcare briefing scene, one professional explaining current dementia-care developments, clean informative layout'\n    },\n    {\n      role: 'information',\n      text: ensureInfo((narrative.slide3 ? narrative.slide3 + ' ' : '') + fact2 + ' ' + fact3, 'Recent reports show growing pressure across dementia pathways and carer support services.', 'Evidence update'),\n      imagePrompt: 'Single UK consultation scene, healthcare professional discussing one evidence summary with a carer, realistic clinical environment'\n    },\n    {\n      role: 'information',\n      text: ensureInfo((narrative.slide4 ? narrative.slide4 + ' ' : '') + action1 + ' ' + action2, 'Practical planning and early contact with services improve stability and reduce crisis risk.', 'What this means for carers'),\n      imagePrompt: 'Single UK care-planning session, carer and professional reviewing a practical weekly support plan, calm environment'\n    },\n    {\n      role: 'conclusion',\n      text: ensureConclusion((narrative.slide5 ? narrative.slide5 + ' ' : '') + action3, 'Use local support pathways, document changes clearly, and review plans regularly with professionals.'),\n      imagePrompt: 'Single hopeful UK home-care scene, carer and older adult following a clear support routine, clean conclusion layout'\n    }\n  ];\n}\n\nconst fallbackSlides = buildFallbackSlides();\n\nconst TARGET_SLIDES = 5;\nconst rawSlides = Array.isArray(parsed.slides) ? parsed.slides : [];\nconst roles = ['cover', 'information', 'information', 'information', 'conclusion'];\nlet normalizedSlides = [];\n\nfor (let i = 0; i < TARGET_SLIDES; i++) {\n  const s = rawSlides[i] || {};\n  const role = roles[i] || 'information';\n\n  let text = clean(s?.text || s?.caption || '');\n  let imagePrompt = sanitizeImagePrompt(s?.imagePrompt || s?.image_prompt || s?.visualPrompt || s?.prompt || s?.image || '');\n\n  if (!text) text = fallbackSlides[i].text;\n  if (role === 'cover') text = ensureCover(text, fallbackSlides[i].text);\n  if (i === 1) text = ensureInfo(text, fallbackSlides[i].text, 'What changed');\n  if (i === 2) text = ensureInfo(text, fallbackSlides[i].text, 'Evidence update');\n  if (i === 3) text = ensureInfo(text, fallbackSlides[i].text, 'What this means for carers');\n  if (role === 'conclusion') text = ensureConclusion(text, fallbackSlides[i].text);\n\n  if (!imagePrompt) imagePrompt = sanitizeImagePrompt(fallbackSlides[i].imagePrompt);\n\n  normalizedSlides.push({ text, imagePrompt, role });\n}\n\nfunction topicHit(text) {\n  if (!topicTokens.length) return true;\n  const set = new Set(tokenize(text));\n  return topicTokens.some((t) => set.has(t));\n}\n\nconst relevanceHits = normalizedSlides.filter((s) => topicHit(s.text + ' ' + s.imagePrompt)).length;\nconst lowInfo = normalizedSlides.some((s, idx) => idx > 0 && idx < 4 && s.text.split(/\\s+/).length < 18);\n\nconst coverOk = normalizedSlides[0]?.role === 'cover';\nconst infoOk = normalizedSlides.slice(1, 4).every((s) => s.role === 'information');\nconst conclusionOk = normalizedSlides[4]?.role === 'conclusion' && /key takeaway:/i.test(normalizedSlides[4]?.text || '');\n\nconst flowIssue = !coverOk || !infoOk || !conclusionOk;\n\nlet driftCorrected = false;\nif ((topicTokens.length > 0 && relevanceHits < 3) || lowInfo || flowIssue) {\n  normalizedSlides = fallbackSlides.map((s) => ({\n    ...s,\n    imagePrompt: sanitizeImagePrompt(s.imagePrompt)\n  }));\n  driftCorrected = true;\n}\n\nlet hashtags = Array.isArray(parsed.hashtags) ? parsed.hashtags : [];\nif (!hashtags.length) hashtags = ['#DementiaCare', '#CarerSupport', '#UKHealth', '#Dignitate'];\nhashtags = [...new Set(hashtags.map((h) => String(h || '').trim()).filter(Boolean))].slice(0, 12);\n\nlet caption = clean(parsed.caption || '');\nif (!caption) {\n  caption = clean(\n    (summary || requestedTopic) +\n    ' This carousel has 5 connected slides: heading, three informative points, and a practical conclusion for carers.'\n  );\n}\nif (caption.length > 700) caption = caption.slice(0, 697) + '...';\n\nlet title = clean(parsed.title || requestedTopic || 'Dementia Care Support');\nif (title.length > 120) title = title.slice(0, 117) + '...';\n\nreturn [{\n  json: {\n    title,\n    slides: normalizedSlides,\n    hashtags,\n    caption,\n    chatId: base.chatId || commandData.chatId,\n    args: requestedTopic,\n    topicLocked: Boolean(base.topicLocked ?? true),\n    topicSource: base.topicSource || 'resolved',\n    coherence: {\n      relevanceHits,\n      driftCorrected,\n      coverOk,\n      infoOk,\n      conclusionOk\n    }\n  }\n}];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000012",
+      "name": "Parse Carousel Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json || {};\nconst rawContent = response.choices?.[0]?.message?.content || '{}';\nconst content = Array.isArray(rawContent)\n  ? rawContent.map((c) => c?.text || '').join('\\n')\n  : String(rawContent || '{}');\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction parseJsonLoose(text) {\n  const t = clean(text);\n  if (!t) return null;\n  const stripped = t\n    .replace(/^\\x60\\x60\\x60json\\s*/i, '')\n    .replace(/^\\x60\\x60\\x60\\s*/i, '')\n    .replace(/\\x60\\x60\\x60$/i, '')\n    .trim();\n  try { return JSON.parse(stripped); } catch (e) {}\n  const start = stripped.indexOf('{');\n  const end = stripped.lastIndexOf('}');\n  if (start >= 0 && end > start) {\n    try { return JSON.parse(stripped.slice(start, end + 1)); } catch (e) {}\n  }\n  return null;\n}\n\nfunction tokenize(text) {\n  const stop = new Set(['the','and','for','with','that','this','from','into','your','about','over','more','than','have','has','had','are','was','were','will','can','their','they','them','our','out','now','new','how','why']);\n  return clean(text)\n    .toLowerCase()\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .split(/\\s+/)\n    .filter((w) => w.length > 2 && !stop.has(w));\n}\n\nfunction clampWords(text, minWords, maxWords) {\n  let words = clean(text).split(/\\s+/).filter(Boolean);\n  if (!words.length) words = ['Dementia', 'care', 'support', 'update'];\n  if (words.length > maxWords) words = words.slice(0, maxWords);\n  if (words.length < minWords) {\n    const filler = ['for', 'UK', 'carers', 'and', 'families'];\n    while (words.length < minWords) {\n      words.push(filler[(words.length - 1) % filler.length]);\n    }\n  }\n  return words.join(' ');\n}\n\nfunction ensureSentence(text) {\n  const t = clean(text);\n  if (!t) return t;\n  return /[.!?]$/.test(t) ? t : (t + '.');\n}\n\nfunction ensureRoleText(idx, text, fallback) {\n  let t = clean(text || fallback);\n  if (!t) t = clean(fallback);\n  if (idx === 0 && !/^why this matters now:/i.test(t)) t = 'Why this matters now: ' + t;\n  if (idx === 1 && !/^what changed:/i.test(t)) t = 'What changed: ' + t;\n  if (idx === 2 && !/^evidence update:/i.test(t)) t = 'Evidence update: ' + t;\n  if (idx === 3 && !/^what this means for carers:/i.test(t)) t = 'What this means for carers: ' + t;\n  if (idx === 4 && !/^next step:/i.test(t)) t = 'Next step: ' + t;\n  if (idx === 4 && !/key takeaway:/i.test(t)) {\n    t += ' Key takeaway: consistent support and early planning reduce pressure on carers and families.';\n  }\n  return ensureSentence(clampWords(t, 14, 28));\n}\n\nlet parsed = parseJsonLoose(content) || {};\n\nlet base = {};\ntry { base = $('Parse Video Research').first().json || {}; } catch (e) {}\n\nlet commandData = {};\ntry { commandData = $('Load Chat History').first().json || {}; } catch (e) {}\n\nconst requestedTopic = clean(base.args || base.requestedTopic || commandData.args || parsed.title || 'Dementia care support for UK carers');\nconst topicTokens = tokenize(requestedTopic);\nconst researchSummary = clean(base.research || '');\n\nconst creatorImageUrl = clean(base.creatorImageUrl || '');\nconst creatorVoiceId = clean(base.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L');\n\nfunction enrichPrompt(rawPrompt, fallbackPrompt) {\n  const raw = clean(rawPrompt || fallbackPrompt);\n  const identity = creatorImageUrl\n    ? 'same exact person identity as the provided reference image, preserve face consistency across scenes'\n    : 'same main person identity across all scenes';\n  const realism = 'photorealistic human, natural skin texture, documentary realism, cinematic natural lighting, realistic movement';\n  const guard = 'single scene only, no collage, no grid, no split-screen, no storyboard, no text overlays, no logos';\n  return [raw, 'topic context: ' + requestedTopic, identity, realism, guard].join(', ');\n}\n\nfunction topicHit(text) {\n  if (!topicTokens.length) return true;\n  const set = new Set(tokenize(text));\n  return topicTokens.some((t) => set.has(t));\n}\n\nconst fallbackNarrationBase = researchSummary || ('Current focus: ' + requestedTopic);\n\nconst fallbackScenes = [\n  {\n    narration: ensureRoleText(0, '', 'Why this matters now: carers across the UK are facing rising pressure in dementia support and need clearer practical guidance.'),\n    visualPrompt: enrichPrompt('realistic UK carer in conversation with dementia specialist in a calm clinical setting', 'realistic UK caregiving opening scene')\n  },\n  {\n    narration: ensureRoleText(1, '', 'What changed: recent service demand and pathway delays are making timely dementia-care support harder to access consistently.'),\n    visualPrompt: enrichPrompt('realistic UK service update discussion between professional and carer with a single data chart in background', 'realistic UK context scene')\n  },\n  {\n    narration: ensureRoleText(2, '', ('Evidence update: ' + fallbackNarrationBase).slice(0, 260)),\n    visualPrompt: enrichPrompt('realistic UK consultation scene where evidence is explained clearly to a carer', 'realistic UK evidence scene')\n  },\n  {\n    narration: ensureRoleText(3, '', 'What this means for carers: clear routines, early support contact, and written care plans improve stability and reduce crisis moments.'),\n    visualPrompt: enrichPrompt('realistic UK home-care planning session with carer and professional reviewing practical next steps', 'realistic UK guidance scene')\n  },\n  {\n    narration: ensureRoleText(4, '', 'Next step: choose one practical action today, track changes weekly, and seek local support early when needs increase.'),\n    visualPrompt: enrichPrompt('realistic hopeful UK closing scene with carer and older adult following a simple support routine', 'realistic UK closing scene')\n  }\n];\n\nconst rawHook = parsed.hook || {};\nconst rawMiddle = Array.isArray(parsed.scenes) ? parsed.scenes.slice(0, 3) : [];\nwhile (rawMiddle.length < 3) rawMiddle.push({});\nconst rawCta = parsed.cta || {};\n\nlet candidate = [rawHook, ...rawMiddle, rawCta].map((s, idx) => {\n  const fallback = fallbackScenes[idx];\n  const narration = ensureRoleText(idx, s?.narration || s?.text || '', fallback.narration);\n  const visualPrompt = enrichPrompt(\n    s?.visualPrompt || s?.imagePrompt || s?.prompt || s?.image || '',\n    fallback.visualPrompt\n  );\n  return { narration, visualPrompt };\n});\n\nconst relevanceHits = candidate.filter((s) => topicHit(s.narration + ' ' + s.visualPrompt)).length;\nconst lowInfo = candidate.some((s) => clean(s.narration).split(/\\s+/).filter(Boolean).length < 12);\n\nlet driftCorrected = false;\nif ((topicTokens.length > 0 && relevanceHits < 4) || lowInfo) {\n  candidate = fallbackScenes;\n  driftCorrected = true;\n}\n\nconst allScenes = candidate.map((s, idx) => ({\n  narration: s.narration,\n  visualPrompt: s.visualPrompt,\n  type: idx === 0 ? 'hook' : (idx === 4 ? 'cta' : 'scene'),\n  duration: idx === 0 ? 3 : (idx === 4 ? 5 : 6),\n  index: idx\n}));\n\nconst fullNarration = allScenes.map((s) => clean(s.narration)).filter(Boolean).join(' ');\n\nlet hashtags = Array.isArray(parsed.hashtags) ? parsed.hashtags : [];\nif (!hashtags.length) hashtags = ['#DementiaCare', '#CarerSupport', '#UKHealth', '#Dignitate'];\nhashtags = [...new Set(hashtags.map((h) => clean(h)).filter(Boolean))].slice(0, 12);\n\nlet caption = clean(parsed.caption || '');\nif (!caption) {\n  caption = clean(requestedTopic + '. Short-form, research-backed guidance for carers with a clear 5-part story arc: hook, context, evidence, practical steps, and action.');\n}\nif (caption.length > 700) caption = caption.slice(0, 697) + '...';\n\nlet title = clean(parsed.title || requestedTopic || 'Dementia Care Video');\nif (title.length > 120) title = title.slice(0, 117) + '...';\n\nreturn [{\n  json: {\n    title,\n    hook: allScenes[0],\n    scenes: allScenes.slice(1, 4),\n    cta: allScenes[4],\n    hashtags,\n    caption,\n    fullNarration,\n    allScenes,\n    sceneCount: allScenes.length,\n    chatId: base.chatId || commandData.chatId,\n    args: requestedTopic,\n    creatorImageUrl,\n    creatorVoiceId,\n    coherence: {\n      relevanceHits,\n      driftCorrected,\n      lowInfo\n    }\n  }\n}];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000013",
+      "name": "Parse Video Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json || {};\nconst rawContent = response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? '[]';\nconst content = Array.isArray(rawContent)\n  ? rawContent.map((c) => (typeof c === 'string' ? c : (c?.text || JSON.stringify(c)))).join('\\n')\n  : String(rawContent || '[]');\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction asArray(v) {\n  if (Array.isArray(v)) return v;\n  if (v && typeof v === 'object') {\n    for (const key of ['topics', 'trends', 'items', 'results', 'data']) {\n      if (Array.isArray(v[key])) return v[key];\n    }\n    if (v.title || v.topic) return [v];\n  }\n  return [];\n}\n\nfunction parseJsonLoose(text) {\n  const t = String(text || '').trim();\n  if (!t) return [];\n\n  const stripped = t\n    .replace(/^\\x60\\x60\\x60json\\s*/i, '')\n    .replace(/^\\x60\\x60\\x60\\s*/i, '')\n    .replace(/\\x60\\x60\\x60$/i, '')\n    .trim();\n\n  try {\n    const parsed = JSON.parse(stripped);\n    const arr = asArray(parsed);\n    if (arr.length) return arr;\n  } catch (e) {}\n\n  const aStart = stripped.indexOf('[');\n  const aEnd = stripped.lastIndexOf(']');\n  if (aStart >= 0 && aEnd > aStart) {\n    try {\n      const parsed = JSON.parse(stripped.slice(aStart, aEnd + 1));\n      const arr = asArray(parsed);\n      if (arr.length) return arr;\n    } catch (e) {}\n  }\n\n  const oStart = stripped.indexOf('{');\n  const oEnd = stripped.lastIndexOf('}');\n  if (oStart >= 0 && oEnd > oStart) {\n    try {\n      const parsed = JSON.parse(stripped.slice(oStart, oEnd + 1));\n      const arr = asArray(parsed);\n      if (arr.length) return arr;\n    } catch (e) {}\n  }\n\n  return [];\n}\n\nfunction normTitle(s) {\n  return clean(s).toLowerCase().replace(/[^a-z0-9\\s]/g, '').replace(/\\s+/g, ' ').trim();\n}\n\nconst allowedCategories = new Set(['policy', 'research', 'caregiving', 'community', 'technology', 'finance', 'legal', 'clinical']);\nconst parsed = parseJsonLoose(content);\n\nlet topics = parsed\n  .map((t) => {\n    const title = clean(t?.title || t?.topic || '');\n    const summary = clean(t?.summary || t?.description || '');\n    let engagement_score = Number(t?.engagement_score ?? t?.engagementScore ?? 7);\n    if (!Number.isFinite(engagement_score)) engagement_score = 7;\n    engagement_score = Math.max(1, Math.min(10, Math.round(engagement_score)));\n\n    const rawCat = clean(t?.category || '').toLowerCase();\n    const category = allowedCategories.has(rawCat) ? rawCat : 'caregiving';\n    const region = clean(t?.region || 'UK');\n\n    return { title, summary, engagement_score, category, region };\n  })\n  .filter((t) => t.title && t.summary);\n\nconst fallbackPool = [\n  {\n    title: 'NHS Dementia Diagnosis Pathway Performance Update',\n    summary: 'Latest NHS pathway performance and waiting-time changes are affecting early diagnosis and support access for carers in the UK.',\n    engagement_score: 8,\n    category: 'clinical',\n    region: 'UK'\n  },\n  {\n    title: 'Local Authority Social Care Funding Pressures and Carer Impact',\n    summary: 'Council-level social care budget pressures are changing respite availability, home support capacity, and carer strain.',\n    engagement_score: 8,\n    category: 'finance',\n    region: 'UK'\n  },\n  {\n    title: 'Dementia Research Trial Recruitment and What It Means for Families',\n    summary: 'UK trial recruitment trends are shifting opportunities for participation and information access for families and carers.',\n    engagement_score: 7,\n    category: 'research',\n    region: 'UK'\n  },\n  {\n    title: 'Carer Legal Rights: Attendance Allowance and Support Entitlements',\n    summary: 'Recent guidance changes on entitlements and assessments are influencing financial and practical support for carers.',\n    engagement_score: 8,\n    category: 'legal',\n    region: 'UK'\n  },\n  {\n    title: 'Community Dementia Hubs Expanding Practical Support Services',\n    summary: 'Community hubs are introducing local support models that improve navigation, peer support, and caregiver wellbeing.',\n    engagement_score: 7,\n    category: 'community',\n    region: 'UK'\n  },\n  {\n    title: 'Digital Tools for Dementia Care Coordination in Primary Care',\n    summary: 'Digital coordination tools are being adopted to improve care continuity between GPs, memory clinics, and carers.',\n    engagement_score: 7,\n    category: 'technology',\n    region: 'UK'\n  },\n  {\n    title: 'Workforce Shortages in Dementia Services and Care Quality Risks',\n    summary: 'Staffing pressures across dementia services are affecting continuity, communication, and experience of care.',\n    engagement_score: 8,\n    category: 'policy',\n    region: 'UK'\n  },\n  {\n    title: 'Culturally Tailored Carer Support Programmes Expanding Across the UK',\n    summary: 'New culturally responsive support services are improving access and outcomes for carers from diverse communities.',\n    engagement_score: 8,\n    category: 'caregiving',\n    region: 'UK'\n  }\n];\n\nconst seenIncoming = new Set();\ntopics = topics.filter((t) => {\n  const k = normTitle(t.title);\n  if (!k || seenIncoming.has(k)) return false;\n  seenIncoming.add(k);\n  return true;\n});\n\nif (topics.length < 8) {\n  for (const f of fallbackPool) {\n    const key = normTitle(f.title);\n    if (seenIncoming.has(key)) continue;\n    topics.push(f);\n    seenIncoming.add(key);\n    if (topics.length >= 8) break;\n  }\n}\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sentTrends) staticData.sentTrends = [];\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.globalSuggestedTopic) staticData.globalSuggestedTopic = '';\nif (!staticData.userMemory) staticData.userMemory = {};\nif (!staticData.trendCursorByChat) staticData.trendCursorByChat = {};\nif (!staticData.trendHistoryByChat) staticData.trendHistoryByChat = {};\n\nlet chatId = clean(response.chatId || response.chat_id || '');\nif (!chatId) {\n  try { chatId = clean($('Quick Parse Slash').first().json.chatId); } catch (e) {}\n}\nif (!chatId) {\n  try { chatId = clean($('Load Chat History').first().json.chatId); } catch (e) {}\n}\nif (!chatId) chatId = clean(staticData.defaultChatId || '');\nif (!chatId) return [];\n\nconst chatKey = String(chatId);\nconst now = Date.now();\nconst dedupeWindowMs = 72 * 60 * 60 * 1000;\nstaticData.sentTrends = staticData.sentTrends.filter((t) => now - Number(t.timestamp || 0) < dedupeWindowMs);\n\nconst historyWindowMs = 24 * 60 * 60 * 1000;\nconst history = Array.isArray(staticData.trendHistoryByChat[chatKey]) ? staticData.trendHistoryByChat[chatKey] : [];\nconst recentHistory = history.filter((h) => now - Number(h.timestamp || 0) < historyWindowMs);\nstaticData.trendHistoryByChat[chatKey] = recentHistory;\n\nconst recentlySentGlobal = new Set(staticData.sentTrends.map((t) => normTitle(t.title || '')));\nconst recentlySentChat = new Set(recentHistory.map((t) => normTitle(t.title || '')));\n\nlet fresh = topics.filter((t) => !recentlySentGlobal.has(normTitle(t.title)) && !recentlySentChat.has(normTitle(t.title)));\nif (!fresh.length) fresh = topics.filter((t) => !recentlySentChat.has(normTitle(t.title)));\nconst pool = fresh.length ? fresh : topics;\n\nconst sorted = [...pool].sort((a, b) => b.engagement_score - a.engagement_score);\nconst selected = [];\nconst usedCat = new Set();\n\nfor (const t of sorted) {\n  if (!usedCat.has(t.category)) {\n    selected.push(t);\n    usedCat.add(t.category);\n  }\n  if (selected.length >= 8) break;\n}\nfor (const t of sorted) {\n  if (selected.length >= 8) break;\n  if (!selected.includes(t)) selected.push(t);\n}\n\nlet ordered = selected.slice(0, 8);\nconst cursor = Number(staticData.trendCursorByChat[chatKey] || 0);\nif (ordered.length > 1) {\n  const shift = ((cursor % ordered.length) + ordered.length) % ordered.length;\n  ordered = ordered.slice(shift).concat(ordered.slice(0, shift));\n}\nstaticData.trendCursorByChat[chatKey] = cursor + 1;\n\nconst lastTopNorm = normTitle(staticData.lastTrendByChat[chatKey] || '');\nif (ordered.length > 1 && normTitle(ordered[0]?.title || '') === lastTopNorm) {\n  const swapIdx = ordered.findIndex((t, i) => i > 0 && normTitle(t.title) !== lastTopNorm);\n  if (swapIdx > 0) {\n    const tmp = ordered[0];\n    ordered[0] = ordered[swapIdx];\n    ordered[swapIdx] = tmp;\n  }\n}\n\nconst finalTopics = ordered.slice(0, 8);\nfor (const t of finalTopics) {\n  staticData.sentTrends.push({ title: t.title, category: t.category, timestamp: now });\n}\n\nif (finalTopics[0]?.title) {\n  const selectedTitle = String(finalTopics[0].title).trim();\n  staticData.lastTrendByChat[chatKey] = selectedTitle;\n  staticData.latestSuggestedTopicByChat[chatKey] = selectedTitle;\n  staticData.pendingTrendTopicByChat[chatKey] = selectedTitle;\n  staticData.globalSuggestedTopic = selectedTitle;\n  staticData.userMemory[chatKey] = {\n    ...(staticData.userMemory[chatKey] || {}),\n    lastTopic: selectedTitle,\n    lastAction: 'trends',\n    updatedAt: now\n  };\n}\n\nstaticData.trendHistoryByChat[chatKey] = [\n  ...recentHistory,\n  ...finalTopics.map((t) => ({ title: t.title, timestamp: now }))\n].slice(-60);\n\nreturn finalTopics.map((t, idx) => ({\n  json: {\n    ...t,\n    chatId,\n    rank: idx + 1,\n    totalTopics: finalTopics.length\n  }\n}));\n"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000014",
+      "name": "Parse Trends Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`Creating Carousel (v3.9-direct-after-split)...\n\nTitle: ${$json.title || 'Untitled Carousel'}\nSlides: ${Array.isArray($json.slides) ? $json.slides.length : 0}\nFirst slide text: ${(() => {\n  const t = String($json.slides?.[0]?.text || 'n/a').trim();\n  if (t.length <= 140) return t;\n  const cut = t.slice(0, 140);\n  const i = cut.lastIndexOf(' ');\n  return (i > 60 ? cut.slice(0, i) : cut) + '...';\n})()}\n\nGenerating unique images per slide with fal.ai...`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000015",
+      "name": "Carousel - Status Update",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000015",
+      "position": [
+        940,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`Creating Video...\n\nTitle: ${$json.title || 'Untitled Video'}\nScenes: ${$json.sceneCount || 0}\nCreator face: ${$json.creatorImageUrl ? 'set' : 'not set'}\nCreator voice: ${$json.creatorVoiceId ? 'set' : 'default'}\n\nStep 1/3: Creating voiceover with ElevenLabs...`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000016",
+      "name": "Video - Status Update",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000016",
+      "position": [
+        940,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.trendMessage || \"Trending topic unavailable.\" }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Carousel",
+                    "additionalFields": {
+                      "callback_data": "/carousel"
+                    }
+                  },
+                  {
+                    "text": "Video",
+                    "additionalFields": {
+                      "callback_data": "/video"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000017",
+      "name": "Trends - Send Topic",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000017",
+      "position": [
+        940,
+        640
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nlet data = input;\n\n// Fallback in case upstream node accidentally passes Telegram API response.\nif (!Array.isArray(data.slides) || data.slides.length === 0) {\n  try { data = $('Parse Carousel Response').first().json || data; } catch (e) {}\n}\n\nconst slides = Array.isArray(data.slides) ? data.slides : [];\nif (!slides.length) {\n  throw new Error('No slides found in carousel payload. Ensure Split Slides receives Parse Carousel Response output.');\n}\n\nreturn slides.map((slide, idx) => ({\n  json: {\n    slideIndex: idx,\n    totalSlides: slides.length,\n    slideRole: String(slide.role || (idx === 0 ? 'cover' : (idx === slides.length - 1 ? 'conclusion' : 'information'))),\n    imagePrompt: slide.imagePrompt || slide.image_prompt || slide.visualPrompt || slide.prompt || '',\n    slideText: slide.text || slide.caption || '',\n    chatId: data.chatId,\n    title: data.title,\n    hashtags: data.hashtags,\n    caption: data.caption,\n    args: data.args\n  }\n}));"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000018",
+      "name": "Split Slides",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-pro",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Key fd30e6ca-bdaa-4def-98e7-cecf03482256:172858bdfaed85c84b8ae2fb4e26cf7c"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  prompt: $json.falPrompt || 'Compassionate UK caregiving scene, single clean frame, modern sans-serif typography, no collage, no handwriting, no logo, no watermark',\n  num_images: 1,\n  seed: $json.falSeed,\n  aspect_ratio: \"4:5\",\n  output_format: \"png\",\n  safety_tolerance: \"4\",\n  resolution: \"1K\",\n  limit_generations: true\n}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000019",
+      "name": "fal.ai - Submit Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1420,
+        160
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000020",
+      "name": "Collect Images",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet carouselData = {};\ntry { carouselData = $('Parse Carousel Response').first().json || {}; } catch (e) {}\n\nconst allImageUrls = [];\nconst expectedCandidates = [];\nconst failedRequests = [];\n\nfunction collectUrls(node, out) {\n  if (!node) return;\n  if (Array.isArray(node)) {\n    for (const x of node) collectUrls(x, out);\n    return;\n  }\n  if (typeof node === 'string') {\n    const u = node.trim();\n    if (/^https?:\\/\\//i.test(u)) out.push(u);\n    return;\n  }\n  if (typeof node !== 'object') return;\n\n  const candidates = [node.url, node.image_url, node.imageUrl];\n  for (const v of candidates) {\n    const u = String(v || '').trim();\n    if (/^https?:\\/\\//i.test(u)) out.push(u);\n  }\n\n  if (node.images) collectUrls(node.images, out);\n  if (node.image) collectUrls(node.image, out);\n  if (node.output) collectUrls(node.output, out);\n  if (node.outputs) collectUrls(node.outputs, out);\n  if (node.data) collectUrls(node.data, out);\n  if (node.result) collectUrls(node.result, out);\n  if (node.response) collectUrls(node.response, out);\n}\n\nfor (const item of items) {\n  const j = item?.json || {};\n\n  if (j.falError) {\n    failedRequests.push({ request_id: j.request_id || j.requestId || '', error: String(j.falError) });\n  }\n\n  collectUrls(j, allImageUrls);\n\n  if (Number.isFinite(Number(j.totalSlides)) && Number(j.totalSlides) > 0) {\n    expectedCandidates.push(Number(j.totalSlides));\n  }\n\n  const nestedData = Array.isArray(j.data) ? j.data : [];\n  for (const row of nestedData) {\n    const rowJson = row?.json || row || {};\n    collectUrls(rowJson, allImageUrls);\n\n    if (Number.isFinite(Number(rowJson.totalSlides)) && Number(rowJson.totalSlides) > 0) {\n      expectedCandidates.push(Number(rowJson.totalSlides));\n    }\n  }\n}\n\nconst uniqueUrls = [...new Set(allImageUrls)];\nlet expectedSlides = Array.isArray(carouselData.slides) ? carouselData.slides.length : 0;\nif (!expectedSlides && expectedCandidates.length) {\n  expectedSlides = Math.max(...expectedCandidates);\n}\nif (!expectedSlides) expectedSlides = 5;\n\nif (!uniqueUrls.length) {\n  const reason = failedRequests.length\n    ? (' fal.ai details: ' + failedRequests.map((f) => (f.request_id ? '[' + f.request_id + '] ' : '') + f.error).join(' | ').slice(0, 700))\n    : '';\n  throw new Error('No image URLs were returned from fal.ai.' + reason);\n}\n\nconst partialGeneration = uniqueUrls.length < expectedSlides;\nconst missingSlides = partialGeneration ? Math.max(0, expectedSlides - uniqueUrls.length) : 0;\n\nreturn [{ json: {\n  ...carouselData,\n  allImageUrls: uniqueUrls,\n  imageUrl: uniqueUrls[0] || '',\n  firstImageUrl: uniqueUrls[0] || '',\n  imageCount: uniqueUrls.length,\n  expectedSlides,\n  partialGeneration,\n  missingSlides,\n  failedRequests\n} }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000021",
+      "name": "Package Carousel Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingContent) staticData.pendingContent = {};\n\nconst data = $input.first().json;\nconst chatId = String(data.chatId);\n\nstaticData.pendingContent[chatId] = {\n  type: 'carousel',\n  title: data.title,\n  slides: data.slides,\n  hashtags: data.hashtags,\n  caption: data.caption,\n  allImageUrls: data.allImageUrls || [],\n  imageUrl: data.imageUrl,\n  firstImageUrl: data.firstImageUrl,\n  imageCount: data.imageCount,\n  chatId: data.chatId,\n  args: data.args,\n  timestamp: Date.now()\n};\n\nreturn [{ json: data }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000022",
+      "name": "Store Pending Carousel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`CAROUSEL READY FOR REVIEW\\n\\nTitle: ${$json.title || \"Untitled Carousel\"}\\nSlides: ${Array.isArray($json.slides) ? $json.slides.length : 0}\\nImages generated: ${$json.imageCount ?? 0}${$json.partialGeneration ? `\\nWarning: ${$json.missingSlides || 0} slide image(s) are missing due to model queue delays.` : \"\"}\\n\\nReply /approve to post to Instagram, LinkedIn, and X/Twitter.\\nReply /regenerate to create a new version.`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000023",
+      "name": "Send Carousel for Approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000023",
+      "position": [
+        2380,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let data = $input.first().json || {};\n\n// When upstream is Telegram send-message output, recover the real carousel payload.\nif (!Array.isArray(data.allImageUrls) || data.allImageUrls.length === 0) {\n  try { data = $('Store Pending Carousel').first().json || data; } catch (e) {}\n}\nif (!Array.isArray(data.allImageUrls) || data.allImageUrls.length === 0) {\n  try { data = $('Package Carousel Data').first().json || data; } catch (e) {}\n}\n\nconst urls = Array.isArray(data.allImageUrls) ? data.allImageUrls.filter(Boolean) : [];\nif (!urls.length) {\n  throw new Error('No carousel image URLs found to send on Telegram.');\n}\n\nreturn urls.map((url, idx) => ({\n  json: {\n    chatId: data.chatId,\n    imageUrl: String(url),\n    slideIndex: idx + 1,\n    totalSlides: urls.length,\n    title: data.title || ''\n  }\n}));"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000024",
+      "name": "Split Remaining Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendPhoto",
+        "chatId": "={{ $json.chatId }}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "additionalFields": {
+          "caption": "={{`Slide ${$json.slideIndex || 1}/${$json.totalSlides || 1}${$json.title ? ` - ${$json.title}` : \"\"}`}}"
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000025",
+      "name": "Send Remaining Images",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000025",
+      "position": [
+        2860,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.elevenlabs.io/v1/text-to-speech/' + ($json.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "sk_96cdae19ae78291c12fdf9dff492a7dbbb9111bdb8c5cfd8"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  text: ($json.fullNarration || \"Supporting cultural carers through the dementia journey.\"),\n  model_id: \"eleven_multilingual_v2\",\n  voice_settings: {\n    stability: 0.5,\n    similarity_boost: 0.75,\n    style: 0.4\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audioFile"
+            }
+          }
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000026",
+      "name": "ElevenLabs - Create Voiceover",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1180,
+        400
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const videoData = $('Parse Video Response').first().json || {};\n\nconst scenes = Array.isArray(videoData.allScenes) ? videoData.allScenes : [];\nreturn scenes.map((scene, idx) => ({\n  json: {\n    ...scene,\n    sceneIndex: idx,\n    totalScenes: scenes.length,\n    chatId: videoData.chatId,\n    title: videoData.title,\n    hashtags: videoData.hashtags,\n    caption: videoData.caption,\n    fullNarration: videoData.fullNarration,\n    creatorImageUrl: videoData.creatorImageUrl || '',\n    creatorVoiceId: videoData.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L'\n  }\n}));\n"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000027",
+      "name": "Prepare Video Scenes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.creatorImageUrl ? 'https://fal.run/fal-ai/kling-video/v3/standard/image-to-video' : 'https://fal.run/fal-ai/kling-video/v3/standard/text-to-video' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Key 83b53447-1666-4081-8427-0966a0a417b1:dfd68c65a645398e1dbb432f054e13ff"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(\n  $json.creatorImageUrl\n    ? {\n        start_image_url: $json.creatorImageUrl,\n        prompt: (($json.visualPrompt || 'realistic UK caregiving scene') + ', preserve exact person identity from reference image, photorealistic human face, natural skin texture, cinematic lighting, realistic movement, no animation, no cartoon'),\n        duration: \"5\",\n        aspect_ratio: \"9:16\",\n        generate_audio: false,\n        negative_prompt: \"blur, distort, low quality, text overlay, watermark\",\n        cfg_scale: 0.5\n      }\n    : {\n        prompt: (($json.visualPrompt || 'realistic UK caregiving scene') + ', photorealistic human, cinematic natural lighting, realistic movement, no animation, no cartoon'),\n        duration: \"5\",\n        aspect_ratio: \"9:16\",\n        generate_audio: false,\n        negative_prompt: \"blur, distort, low quality, text overlay, watermark\",\n        cfg_scale: 0.5\n      }\n) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000028",
+      "name": "Kling v3 - Generate Clip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1660,
+        400
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000029",
+      "name": "Collect All Clips",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst videoData = $('Parse Video Response').first().json || {};\n\nconst videoClips = items\n  .map((item, idx) => {\n    const url = item.json?.video?.url || item.json?.data?.video?.url || item.json?.output?.video?.url || null;\n    return { index: idx, url, duration: 5 };\n  })\n  .filter((clip) => clip.url);\n\nconst creatorVoiceId = String(videoData.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L').trim();\nconst narrationText = String(videoData.fullNarration || '').trim();\n\nconst out = {\n  type: 'video',\n  title: videoData.title,\n  hashtags: videoData.hashtags || [],\n  caption: videoData.caption || '',\n  chatId: videoData.chatId,\n  args: videoData.args || '',\n  clipCount: videoClips.length,\n  videoClips,\n  clipUrls: videoClips.map((c) => c.url),\n  scenes: videoData.allScenes || [],\n  fullNarration: narrationText,\n  narrationText,\n  creatorVoiceId,\n  creatorImageUrl: videoData.creatorImageUrl || '',\n  status: videoClips.length > 0 ? 'success' : 'partial'\n};\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingContent) staticData.pendingContent = {};\n\nconst chatKey = String(out.chatId || '');\nif (chatKey) {\n  staticData.pendingContent[chatKey] = {\n    ...out,\n    timestamp: Date.now()\n  };\n}\n\nreturn [{ json: out }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000030",
+      "name": "Package Video Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare payload for GitHub rendering.\n// Renderer can synthesize audio from narrationText + voiceId if audioUrl is empty.\nconst data = $input.first().json || {};\n\nlet hasVoiceoverBinary = false;\ntry {\n  const audioBinary = $('ElevenLabs - Create Voiceover').first().binary;\n  hasVoiceoverBinary = Boolean(audioBinary?.audioFile?.data);\n} catch (e) {\n  hasVoiceoverBinary = false;\n}\n\nreturn [{\n  json: {\n    ...data,\n    audioUrl: String(data.audioUrl || '').trim(),\n    narrationText: String(data.narrationText || data.fullNarration || '').trim(),\n    creatorVoiceId: String(data.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L').trim(),\n    hasVoiceoverBinary\n  }\n}];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000031",
+      "name": "Prepare Render Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2380,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $env.GITHUB_OWNER }}/{{ $env.GITHUB_REPO }}/dispatches",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.GITHUB_PAT }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  event_type: 'render-video',\n  client_payload: {\n    clipUrls: $json.clipUrls,\n    audioUrl: $json.audioUrl || '',\n    narrationText: $json.narrationText || $json.fullNarration || '',\n    voiceId: $json.creatorVoiceId || 'GoLTMzQJAHarswiHqv3L',\n    scenes: $json.scenes,\n    title: $json.title,\n    chatId: String($json.chatId),\n    hashtags: $json.hashtags,\n    caption: $json.caption\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000032",
+      "name": "Trigger GitHub Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "position": [
+        2620,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Package Video Data').first().json.chatId }}",
+        "text": "={{`Assembling your video with Remotion...\\n\\nTitle: ${$('Package Video Data').first().json.title || 'Untitled Video'}\\nClips: ${$('Package Video Data').first().json.clipCount || 0}\\nVoice: ${($('Package Video Data').first().json.creatorVoiceId || '') ? 'configured' : 'default'}\\nSubtitles: Word-by-word highlight\\nBranding: Dignitate teal + logo\\n\\nThis takes about 3-5 minutes. You will receive the finished MP4 automatically.`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000060",
+      "name": "Video - Rendering Status",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000060",
+      "position": [
+        2860,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingContent) staticData.pendingContent = {};\n\nconst commandData = $('Load Chat History').first().json;\nconst chatId = String(commandData.chatId);\nconst pending = staticData.pendingContent[chatId];\n\nif (!pending) {\n  return [{ json: { chatId: commandData.chatId, error: true, message: 'No pending content found. Generate content first with /carousel or /video.' } }];\n}\n\nconst contentData = { ...pending };\ndelete staticData.pendingContent[chatId];\n\nreturn [{ json: { ...contentData, chatId: commandData.chatId, approved: true } }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000033",
+      "name": "Handle Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingContent) staticData.pendingContent = {};\n\nconst commandData = $('Load Chat History').first().json;\nconst chatId = String(commandData.chatId);\nconst pending = staticData.pendingContent[chatId];\n\nif (!pending) {\n  return [{ json: { chatId: commandData.chatId, error: true, message: 'No pending content found. Generate content first with /carousel or /video.' } }];\n}\n\nconst contentData = { ...pending };\ndelete staticData.pendingContent[chatId];\n\nreturn [{ json: { ...contentData, chatId: commandData.chatId, regenerate: true } }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000034",
+      "name": "Handle Regeneration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "carousel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Carousel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Video"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000035",
+      "name": "Content Type Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        240,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "carousel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Carousel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Video"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000036",
+      "name": "Regen Type Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        240,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "Carousel approved! Posting to social media now...",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000037",
+      "name": "Approval Confirmed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000037",
+      "position": [
+        460,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction stripPrefixes(text) {\n  return clean(text)\n    .replace(/^why this matters now:\\s*/i, '')\n    .replace(/^what changed:\\s*/i, '')\n    .replace(/^evidence update:\\s*/i, '')\n    .replace(/^what this means for carers:\\s*/i, '')\n    .replace(/^what carers can do next:\\s*/i, '')\n    .trim();\n}\n\nfunction uniqHashtags(list) {\n  const out = [];\n  const seen = new Set();\n  for (const raw of (Array.isArray(list) ? list : [])) {\n    let h = clean(raw);\n    if (!h) continue;\n    if (!h.startsWith('#')) h = '#' + h;\n    const key = h.toLowerCase();\n    if (seen.has(key)) continue;\n    seen.add(key);\n    out.push(h);\n  }\n  return out;\n}\n\nconst input = $input.first().json || {};\nlet data = { ...input };\n\n// After Telegram confirmation nodes, payload can be replaced by Telegram API response.\n// Recover canonical approved content from Handle Approval when needed.\nconst looksLikeTelegramOnly = !data.title && !data.caption && !Array.isArray(data.slides) && !data.imageUrl;\nif (looksLikeTelegramOnly) {\n  try {\n    const approved = $('Handle Approval').first().json || {};\n    data = { ...approved };\n  } catch (e) {}\n}\n\nconst title = clean(data.title || data.args || 'Dementia Care Update');\nconst slides = Array.isArray(data.slides) ? data.slides : [];\nconst allImageUrls = Array.isArray(data.allImageUrls) ? data.allImageUrls.filter(Boolean) : [];\nconst imageUrl = clean(data.imageUrl || allImageUrls[0] || '');\nconst chatId = data.chatId;\nconst type = clean(data.type || 'carousel').toLowerCase();\n\nlet hashtags = uniqHashtags(data.hashtags || []);\nif (!hashtags.length) {\n  hashtags = ['#DementiaCare', '#CarerSupport', '#UKHealth', '#Dignitate'];\n}\n\nlet baseCaption = clean(data.caption || '');\nif (!baseCaption) {\n  baseCaption = 'Evidence-led update for carers with practical next steps and clear takeaways.';\n}\n\nconst keyPoints = slides\n  .map((s) => stripPrefixes(s?.text || s?.caption || ''))\n  .filter(Boolean)\n  .slice(0, 5);\n\nconst pointLines = keyPoints.map((p) => '- ' + p);\n\nconst defaultIntro = 'A practical update from Dignitate for carers and families navigating dementia support.';\nconst intro = baseCaption || defaultIntro;\n\nconst instagramCaption = [\n  title,\n  intro,\n  pointLines.length ? 'Key points:\\n' + pointLines.join('\\n') : '',\n  'Save and share with carers who need clear, practical guidance.',\n  hashtags.join(' ')\n].filter(Boolean).join('\\n\\n').slice(0, 2100);\n\nconst linkedinText = [\n  title,\n  intro,\n  pointLines.length ? 'Highlights:\\n' + pointLines.join('\\n') : '',\n  'Dignitate shares evidence-led dementia content to support cultural carers and families across the UK.',\n  hashtags.slice(0, 8).join(' ')\n].filter(Boolean).join('\\n\\n').slice(0, 2900);\n\nconst xCore = [\n  title,\n  keyPoints[0] ? keyPoints[0] : intro,\n  'Practical next steps for carers in the full carousel.'\n].filter(Boolean).join(' ');\nconst xTags = hashtags.slice(0, 3).join(' ');\nconst xText = (xCore + (xTags ? (' ' + xTags) : '')).slice(0, 275);\n\nreturn [{\n  json: {\n    chatId,\n    type,\n    title,\n    caption: baseCaption,\n    hashtags,\n    allImageUrls,\n    imageUrl,\n    slides,\n    instagramCaption,\n    linkedinText,\n    xText\n  }\n}];\n"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000038",
+      "name": "Prepare Post Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.composio.dev/api/v1/actions/INSTAGRAM_CREATE_MEDIA_CONTAINER/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ak_p_o5n04j9WB8LmAwoRfx"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ connectedAccountId: 'ac_KNBQIWjdvioh', input: { image_url: $('Prepare Post Data').first().json.imageUrl, image_urls: $('Prepare Post Data').first().json.allImageUrls, allImageUrls: $('Prepare Post Data').first().json.allImageUrls, caption: $('Prepare Post Data').first().json.instagramCaption || '', is_carousel: true, media_type: 'CAROUSEL' } }) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000039",
+      "name": "Composio - Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        940,
+        -280
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.composio.dev/api/v1/actions/LINKEDIN_CREATE_POST/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ak_p_o5n04j9WB8LmAwoRfx"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ connectedAccountId: 'ac_T2GUOXxT7_hq', input: { text: $('Prepare Post Data').first().json.linkedinText || '', media_url: $('Prepare Post Data').first().json.imageUrl } }) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000040",
+      "name": "Composio - LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1180,
+        -280
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.composio.dev/api/v1/actions/TWITTER_CREATE_TWEET/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ak_p_o5n04j9WB8LmAwoRfx"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ connectedAccountId: 'ac_lrFu5_tsVghC', input: { text: $('Prepare Post Data').first().json.xText || '', media_url: $('Prepare Post Data').first().json.imageUrl } }) }}",
+        "options": {}
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000041",
+      "name": "Composio - X/Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1420,
+        -280
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const postData = $('Prepare Post Data').first().json;\nlet igStatus = 'Failed';\nlet liStatus = 'Failed';\nlet twStatus = 'Failed';\n\ntry {\n  const igResult = $('Composio - Instagram').first().json;\n  if (igResult && !igResult.error) igStatus = 'Posted';\n} catch(e) {}\n\ntry {\n  const liResult = $('Composio - LinkedIn').first().json;\n  if (liResult && !liResult.error) liStatus = 'Posted';\n} catch(e) {}\n\ntry {\n  const twResult = $('Composio - X/Twitter').first().json;\n  if (twResult && !twResult.error) twStatus = 'Posted';\n} catch(e) {}\n\nconst allSucceeded = igStatus === 'Posted' && liStatus === 'Posted' && twStatus === 'Posted';\nconst noneSucceeded = igStatus === 'Failed' && liStatus === 'Failed' && twStatus === 'Failed';\n\nlet summary;\nif (allSucceeded) {\n  summary = 'CAROUSEL POSTED SUCCESSFULLY!\\n\\nInstagram: ' + igStatus + '\\nLinkedIn: ' + liStatus + '\\nX/Twitter: ' + twStatus + '\\n\\nLive on all platforms!';\n} else if (noneSucceeded) {\n  summary = 'POSTING FAILED\\n\\nInstagram: ' + igStatus + '\\nLinkedIn: ' + liStatus + '\\nX/Twitter: ' + twStatus + '\\n\\nPlease check API credentials and try again.';\n} else {\n  summary = 'POSTING PARTIALLY COMPLETE\\n\\nInstagram: ' + igStatus + '\\nLinkedIn: ' + liStatus + '\\nX/Twitter: ' + twStatus + '\\n\\nSome platforms may need attention.';\n}\n\nreturn [{ json: { chatId: postData.chatId, message: summary } }];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000042",
+      "name": "Check Post Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000043",
+      "name": "Post Results Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000043",
+      "position": [
+        1900,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "Video approved! Sending clip URLs now...",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000044",
+      "name": "Video Approved",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000044",
+      "position": [
+        460,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`VIDEO CLIPS READY!\\n\\nClips: ${$json.clipCount || 0} AI video clips generated\\nVoiceover created\\n\\n${Array.isArray($json.hashtags) ? $json.hashtags.join(' ') : ''}\\n\\nNEXT STEPS:\\n1. Download clips from URLs below\\n2. Use CapCut/DaVinci to stitch with audio\\n3. Post to TikTok, Reels, Shorts\\n\\nClip URLs sent below...`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000045",
+      "name": "Video - Clips Ready",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000045",
+      "position": [
+        700,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst clipUrls = data.clipUrls || [];\n\nreturn clipUrls.map((url, idx) => ({\n  json: {\n    chatId: data.chatId,\n    clipIndex: idx + 1,\n    clipUrl: url,\n    totalClips: clipUrls.length,\n    title: data.title\n  }\n}));"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000046",
+      "name": "Split Clip URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`Clip ${$json.clipIndex || 1}/${$json.totalClips || 1}:\\n${$json.clipUrl || ''}`}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000047",
+      "name": "Send Clip URL",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000047",
+      "position": [
+        1180,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "Regenerating carousel content with a fresh script...",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000048",
+      "name": "Regeneration Started",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000048",
+      "position": [
+        460,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "Regenerating video content with a fresh script...",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000049",
+      "name": "Video Regen Started",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000049",
+      "position": [
+        460,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId || $('Load Chat History').first().json.chatId }}",
+        "text": "={{(() => {\n  const j = $json || {};\n  const detail = j.error?.message || j.error?.description || j.error?.details || j.body?.detail || j.detail || j.message || (typeof j.error === 'string' ? j.error : '') || 'An unexpected error occurred. Please try again.';\n  const slideInfo = (j.slideIndex !== undefined && j.totalSlides !== undefined) ? `\\nSlide: ${Number(j.slideIndex) + 1}/${j.totalSlides}` : '';\n  return `Error: Something went wrong.\\n\\n${String(detail).slice(0, 700)}${slideInfo}\\n\\nTry running the command again or use /status to check bot health.`;\n})()}}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000050",
+      "name": "Error Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "a0b1c2d3-e4f5-6789-abcd-w00000000050",
+      "position": [
+        940,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.autoScheduleByChat) staticData.autoScheduleByChat = {};\nif (!staticData.pendingAutoActionByChat) staticData.pendingAutoActionByChat = {};\n\nconst nowMs = Date.now();\n\nfor (const key of Object.keys(staticData.autoScheduleByChat)) {\n  const cfg = staticData.autoScheduleByChat[key] || {};\n  staticData.autoScheduleByChat[key] = {\n    ...cfg,\n    enabled: false,\n    updatedAt: nowMs,\n  };\n}\n\nfor (const key of Object.keys(staticData.pendingAutoActionByChat)) {\n  staticData.pendingAutoActionByChat[key] = '';\n}\n\nreturn [];"
+      },
+      "id": "a0b1c2d3-e4f5-6789-abcd-000000000051",
+      "name": "Scheduled Trends Prep",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic slash parser for button-first trend flow\nconst data = $input.first().json || {};\nconst rawMessage = String(data.message || '').trim();\nconst replyToText = String(data.replyToText || '').trim();\nconst sourceMessageText = String(data.sourceMessageText || '').trim();\n\nlet actionType = 'none';\nlet args = '';\nlet command = '';\nlet directArgs = '';\nlet topicSource = 'none';\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeTopic(s) {\n  let t = clean(s);\n  for (let i = 0; i < 3; i++) {\n    const first = t.charAt(0);\n    const last = t.charAt(t.length - 1);\n    const pairs = { '\"': '\"', \"'\": \"'\", '(': ')', '[': ']', '{': '}' };\n    if (pairs[first] && pairs[first] === last) t = clean(t.slice(1, -1));\n  }\n  return t;\n}\n\nfunction extractTopicFromTrendMessage(text, cmd) {\n  const t = String(text || '').trim();\n  if (!t) return '';\n\n  const cmdRe = new RegExp('^\\\\s*' + cmd.replace('/', '\\\\/') + '\\\\s+(.+)$', 'im');\n  const cmdMatch = t.match(cmdRe);\n  if (cmdMatch?.[1]) return normalizeTopic(cmdMatch[1]);\n\n  const trendingMatch = t.match(/Trending Topic(?:\\s+\\d+\\/\\d+)?\\s*:\\s*[\\r\\n]+([^\\n\\r]+)/i);\n  if (trendingMatch?.[1]) return normalizeTopic(trendingMatch[1]);\n\n  const lines = t.split(/\\r?\\n/).map((x) => x.trim()).filter(Boolean);\n  if (!lines.length) return '';\n  const idx = lines.findIndex((x) => /^Trending Topic/i.test(x));\n  if (idx >= 0 && lines[idx + 1]) return normalizeTopic(lines[idx + 1]);\n\n  return '';\n}\n\nconst slash = rawMessage.match(/^\\/([a-z0-9_]+)(?:@[A-Za-z0-9_]+)?(?:\\s+([\\s\\S]+))?$/i);\nif (slash) {\n  command = '/' + String(slash[1] || '').toLowerCase();\n  directArgs = normalizeTopic(String(slash[2] || ''));\n} else if (rawMessage.startsWith('/')) {\n  command = rawMessage.split(/\\s+/)[0].toLowerCase();\n}\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.userMemory) staticData.userMemory = {};\nif (!staticData.pendingAutoActionByChat) staticData.pendingAutoActionByChat = {};\nif (!staticData.lastManualCommandAtByChat) staticData.lastManualCommandAtByChat = {};\nif (!staticData.globalSuggestedTopic) staticData.globalSuggestedTopic = '';\n\nconst chatKey = String(data.chatId || '');\nconst defaultChatKey = String(staticData.defaultChatId || '');\nconst memoryKey = chatKey || defaultChatKey;\nconst pick = (...vals) => vals.map((v) => normalizeTopic(v)).find(Boolean) || '';\n\nif (slash) {\n  const map = {\n    '/carousel': 'carousel',\n    '/video': 'video',\n    '/trends': 'trends',\n    '/status': 'status',\n    '/approve': 'approve',\n    '/regenerate': 'regenerate',\n    '/help': 'help',\n    '/auto': 'none',\n    '/commands': 'none',\n    '/cmds': 'none',\n    '/creator': 'none',\n    '/setface': 'none',\n    '/setvoiceid': 'none'\n  };\n  actionType = map[command] || 'none';\n  args = directArgs;\n  if (args && ['carousel', 'video'].includes(actionType)) topicSource = 'direct';\n}\n\nconst fallbackTopic = pick(\n  staticData.pendingTrendTopicByChat[memoryKey],\n  staticData.latestSuggestedTopicByChat[memoryKey],\n  staticData.lastTrendByChat[memoryKey],\n  staticData.userMemory[memoryKey]?.lastTopic,\n  staticData.globalSuggestedTopic\n);\n\nif (!args && ['carousel', 'video'].includes(actionType)) {\n  const replyTopic = extractTopicFromTrendMessage(replyToText, command || '/carousel');\n  if (replyTopic) {\n    args = replyTopic;\n    topicSource = 'reply';\n  }\n}\n\nif (!args && ['carousel', 'video'].includes(actionType) && sourceMessageText) {\n  const sourceTopic = extractTopicFromTrendMessage(sourceMessageText, command || '/carousel');\n  if (sourceTopic) {\n    args = sourceTopic;\n    topicSource = 'source_message';\n  }\n}\n\nif (!args && ['carousel', 'video'].includes(actionType)) {\n  args = fallbackTopic;\n  if (args && topicSource === 'none') topicSource = 'memory';\n}\n\nlet autoAction = '';\nif (!args && ['carousel', 'video'].includes(actionType)) {\n  autoAction = actionType;\n  actionType = 'trends';\n  if (chatKey) staticData.pendingAutoActionByChat[chatKey] = autoAction;\n}\n\nif (args && ['carousel', 'video'].includes(actionType)) {\n  const writeKey = chatKey || memoryKey;\n  if (writeKey) {\n    staticData.userMemory[writeKey] = {\n      ...(staticData.userMemory[writeKey] || {}),\n      lastAction: actionType,\n      lastTopic: args,\n      updatedAt: Date.now()\n    };\n    staticData.pendingTrendTopicByChat[writeKey] = args;\n    staticData.latestSuggestedTopicByChat[writeKey] = args;\n    staticData.lastTrendByChat[writeKey] = args;\n    staticData.pendingAutoActionByChat[writeKey] = '';\n  }\n}\n\nif (chatKey && ['carousel', 'video', 'trends', 'approve', 'regenerate'].includes(actionType)) {\n  staticData.lastManualCommandAtByChat[chatKey] = Date.now();\n}\n\nconst replies = {\n  carousel: args ? 'Great, I will create your carousel on: ' + args : 'I could not resolve a topic for carousel.',\n  video: args ? 'Great, I will create your video draft on: ' + args : 'I could not resolve a topic for video.',\n  trends: autoAction\n    ? 'I could not find a saved topic, so I am fetching fresh trends now and will start your ' + autoAction + ' automatically.'\n    : 'I am pulling broader, diverse dementia-care trends now.',\n  status: 'Everything is online and ready. I can create content whenever you are ready.',\n  approve: 'Perfect, I am approving your latest draft for posting now.',\n  regenerate: 'Understood, I am regenerating your latest draft with fresh research now.',\n  help: 'Tell me a topic and format, for example: /carousel dementia support in UK carers',\n  none: 'Tell me what you want to create and the topic, and I will take it from there.'\n};\n\nreturn [{\n  json: {\n    chatId: data.chatId,\n    messageId: data.messageId,\n    replyToText,\n    replyToMessageId: data.replyToMessageId || null,\n    args,\n    action: { type: actionType, topic: actionType === 'trends' ? '' : args },\n    autoAction,\n    topicSource,\n    explicitTopicProvided: Boolean(directArgs),\n    forcedTopic: directArgs || '',\n    replyText: replies[actionType] || replies.none,\n    command,\n    debugTopicSources: {\n      chatKey,\n      defaultChatKey,\n      memoryKey,\n      directArgs,\n      replyTopicCandidate: extractTopicFromTrendMessage(replyToText, command || '/carousel'),\n      sourceMessageTopicCandidate: extractTopicFromTrendMessage(sourceMessageText, command || '/carousel'),\n      fallbackTopic,\n      autoAction,\n      topicSource,\n      command\n    }\n  }\n}];\n"
+      },
+      "id": "conv-0001-0000-0000-000000000001",
+      "name": "Quick Parse Slash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"anthropic/claude-haiku-4.5\",\n  messages: ($json.aiMessagesJson ? (typeof $json.aiMessagesJson === \"string\" ? JSON.parse($json.aiMessagesJson) : $json.aiMessagesJson) : [])\n}) }}",
+        "options": {}
+      },
+      "id": "conv-0001-0000-0000-000000000002",
+      "name": "AI Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        0,
+        500
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response into reply + structured action, with deterministic intent fallback\nconst response = $input.first().json || {};\nconst chatData = $('Load Chat History').first().json;\nconst rawContent = response.choices?.[0]?.message?.content;\nconst content = Array.isArray(rawContent)\n  ? rawContent.map(c => c?.text || '').join('\\n')\n  : (rawContent || '{}');\n\nfunction safeJsonParse(text) {\n  const cleaned = String(text || '').replace(/```json\\n?/gi, '').replace(/```/g, '').trim();\n  try {\n    return JSON.parse(cleaned);\n  } catch (_) {\n    const start = cleaned.indexOf('{');\n    const end = cleaned.lastIndexOf('}');\n    if (start >= 0 && end > start) {\n      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch (_) {}\n    }\n  }\n  return null;\n}\n\nconst parsed = safeJsonParse(content) || {\n  reply: String(content || '').trim() || 'Happy to help. Tell me what you want to create.',\n  action: { type: 'none', topic: '' }\n};\n\nconst allowed = new Set(['carousel', 'video', 'both', 'trends', 'approve', 'regenerate', 'status', 'help', 'none']);\nconst alias = {\n  trend: 'trends',\n  trending: 'trends',\n  publish: 'approve',\n  post: 'approve',\n  redo: 'regenerate',\n  retry: 'regenerate',\n  reel: 'video',\n  reels: 'video',\n  tiktok: 'video'\n};\n\nlet actionType = String(parsed?.action?.type || 'none').toLowerCase().trim();\nactionType = alias[actionType] || actionType;\nif (!allowed.has(actionType)) actionType = 'none';\n\nlet topic = typeof parsed?.action?.topic === 'string' ? parsed.action.topic.trim() : '';\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.userMemory) staticData.userMemory = {};\nconst chatKey = String(chatData.chatId || '');\nconst mem = staticData.userMemory[chatKey] || {};\nconst pending = staticData.pendingContent?.[chatKey] || {};\n\nconst rawUserText = String(chatData.message || '').trim();\nconst userText = rawUserText.toLowerCase();\nconst isSlash = rawUserText.startsWith('/');\n\nif (isSlash) {\n  const cmd = rawUserText.split(/\\s+/)[0].toLowerCase();\n  const cmdTopic = rawUserText.split(/\\s+/).slice(1).join(' ').trim();\n  const cmdMap = {\n    '/carousel': 'carousel',\n    '/video': 'video',\n    '/trends': 'trends',\n    '/approve': 'approve',\n    '/regenerate': 'regenerate',\n    '/status': 'status',\n    '/help': 'help',\n    '/commands': 'none',\n    '/cmds': 'none',\n    '/creator': 'none',\n    '/setface': 'none',\n    '/setvoiceid': 'none',\n    '/auto': 'none'\n  };\n  if (cmdMap[cmd]) {\n    actionType = cmdMap[cmd];\n    if (cmdTopic) topic = cmdTopic;\n    if (!topic && ['carousel','video'].includes(actionType)) {\n      topic = String(staticData.lastTrendByChat?.[chatKey] || '').trim();\n    }\n  }\n}\n\nif (actionType === 'none' && !isSlash) {\n  const wantsTrends = /(trend|trending|latest news|latest trends|what should .*post|what to post|news)/i.test(userText);\n  const wantsApprove = /(approve|post it|publish|go live|looks good,? post|ship it)/i.test(userText);\n  const wantsRegenerate = /(regenerate|redo|try again|another version|rewrite|new version)/i.test(userText);\n  const wantsStatus = /(status|are you online|bot status|system status|health check)/i.test(userText);\n  const wantsHelp = /(^help$|\\bhelp\\b|what can you do|how do you work|commands)/i.test(userText);\n  const wantsCarousel = /(carousel|carousels|slides|instagram post|instagram carousel)/i.test(userText);\n  const wantsVideo = /(video|reel|reels|tiktok|shorts?)/i.test(userText);\n\n  if (wantsTrends) actionType = 'trends';\n  else if (wantsApprove) actionType = 'approve';\n  else if (wantsRegenerate) actionType = 'regenerate';\n  else if (wantsStatus) actionType = 'status';\n  else if (wantsHelp) actionType = 'help';\n  else if (wantsCarousel && wantsVideo) actionType = 'both';\n  else if (wantsCarousel) actionType = 'carousel';\n  else if (wantsVideo) actionType = 'video';\n}\n\nconst confirmLike = /(\\byes\\b|\\bok\\b|\\bokay\\b|go ahead|do it|make it|sounds good|looks good)/i.test(userText);\nif (actionType === 'none' && confirmLike && ['carousel', 'video', 'both'].includes(mem.lastAction)) {\n  actionType = mem.lastAction;\n}\n\nif (!topic && ['carousel', 'video', 'both'].includes(actionType)) {\n  const aboutMatch = rawUserText.match(/\\b(?:about|on|for)\\s+(.+)$/i);\n  if (aboutMatch?.[1]) {\n    topic = aboutMatch[1].replace(/[.!?]+$/g, '').trim();\n  }\n}\nif (!topic && ['carousel', 'video', 'both'].includes(actionType) && isSlash) {\n  topic = String(mem.lastTopic || pending.args || staticData.lastTrendByChat?.[chatKey] || '').trim();\n}\n\nif (!topic && ['carousel', 'video', 'both'].includes(actionType) && !isSlash) {\n  actionType = 'none';\n}\n\nlet replyText = typeof parsed?.reply === 'string' ? parsed.reply.trim() : '';\nif (!replyText) {\n  replyText = actionType === 'none'\n    ? 'Happy to help. Tell me the topic and whether you want a carousel, a video, or both.'\n    : 'Perfect. I am starting that now.';\n}\nif (replyText.length > 500) {\n  replyText = replyText.slice(0, 480).trim() + '...';\n}\n\nif (actionType === 'none' && !isSlash && /(carousel|carousels|slides|instagram carousel|video|reel|reels|shorts?)/i.test(userText)) {\n  replyText = 'Great. What topic should I cover? For example: dementia early signs in UK families.';\n}\n\nif (rawUserText.startsWith('/carousel')) {\n  replyText = topic\n    ? `Great, I will research \"${topic}\" and build your carousel now.`\n    : 'Great, I will use the latest trend topic and build your carousel now.';\n} else if (rawUserText.startsWith('/video')) {\n  replyText = topic\n    ? `Great, I will research \"${topic}\" and start your video draft now.`\n    : 'Great, I will use the latest trend topic and start your video draft now.';\n} else if (rawUserText.startsWith('/trends')) {\n  replyText = 'I am pulling the latest UK dementia-care trends now.';\n}\n\nif (staticData.conversations && staticData.conversations[chatKey]) {\n  staticData.conversations[chatKey].messages.push({ role: 'assistant', content: replyText });\n  if (staticData.conversations[chatKey].messages.length > 12) {\n    staticData.conversations[chatKey].messages = staticData.conversations[chatKey].messages.slice(-12);\n  }\n}\n\nif (actionType !== 'none') {\n  staticData.userMemory[chatKey] = {\n    lastAction: actionType,\n    lastTopic: topic || mem.lastTopic || '',\n    updatedAt: Date.now()\n  };\n} else {\n  staticData.userMemory[chatKey] = {\n    lastAction: mem.lastAction || 'none',\n    lastTopic: mem.lastTopic || '',\n    updatedAt: Date.now()\n  };\n}\n\nreturn [{ json: {\n  chatId: chatData.chatId,\n  messageId: chatData.messageId,\n  replyText,\n  action: { type: actionType, topic },\n  args: topic || '',\n  command: ''\n} }];"
+      },
+      "id": "conv-0001-0000-0000-000000000003",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "conv-0001-0000-0000-000000000004",
+      "name": "Send AI Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "webhookId": "conv-0001-0000-0000-w00000000004",
+      "position": [
+        480,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "carousel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Carousel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Video"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "both",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Both"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "trends",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Trends"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Approve"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "regenerate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Regenerate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action.type }}",
+                    "rightValue": "help",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Help"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "conv-0001-0000-0000-000000000105",
+      "name": "Action Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare args for carousel pipeline with strict explicit-topic preference\nconst data = $input.first().json || {};\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.userMemory) staticData.userMemory = {};\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeTopic(s) {\n  let t = clean(s);\n  for (let i = 0; i < 3; i++) {\n    const first = t.charAt(0);\n    const last = t.charAt(t.length - 1);\n    const pairs = { '\"': '\"', \"'\": \"'\", '(': ')', '[': ']', '{': '}' };\n    if (pairs[first] && pairs[first] === last) t = clean(t.slice(1, -1));\n  }\n  return t;\n}\n\nconst chatKey = String(data.chatId || '');\nconst defaultChatKey = String(staticData.defaultChatId || '');\nconst memoryKey = chatKey || defaultChatKey;\nconst pick = (...vals) => vals.map(v => normalizeTopic(v)).find(Boolean) || '';\n\nconst explicitFromSlash = pick(data.forcedTopic, data.debugTopicSources?.directArgs);\nlet args = pick(explicitFromSlash, data.action?.topic, data.args);\nlet topicSource = String(data.topicSource || '').trim();\n\nif (!args) {\n  args = pick(\n    staticData.pendingTrendTopicByChat[memoryKey],\n    staticData.latestSuggestedTopicByChat[memoryKey],\n    staticData.lastTrendByChat[memoryKey],\n    staticData.userMemory?.[memoryKey]?.lastTopic\n  );\n  if (args && !topicSource) topicSource = 'memory';\n}\n\nif (!topicSource) {\n  topicSource = explicitFromSlash ? 'direct' : (args ? 'resolved' : 'none');\n}\n\nconst topicLocked = Boolean(explicitFromSlash || data.explicitTopicProvided || topicSource === 'direct' || topicSource === 'message' || topicSource === 'reply');\n\nif (chatKey && args) {\n  staticData.userMemory[chatKey] = {\n    ...(staticData.userMemory[chatKey] || {}),\n    lastAction: 'carousel',\n    lastTopic: args,\n    updatedAt: Date.now()\n  };\n\n  staticData.pendingTrendTopicByChat[chatKey] = args;\n  staticData.latestSuggestedTopicByChat[chatKey] = args;\n  staticData.lastTrendByChat[chatKey] = args;\n}\n\nreturn [{\n  json: {\n    ...data,\n    args,\n    requestedTopic: args,\n    topicSource,\n    topicLocked,\n    chatId: data.chatId,\n    messageId: data.messageId\n  }\n}];"
+      },
+      "id": "conv-0001-0000-0000-000000000006",
+      "name": "Prepare Carousel Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare args for video pipeline with strict explicit-topic preference + creator profile\nconst data = $input.first().json || {};\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.creatorProfileByChat) staticData.creatorProfileByChat = {};\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeTopic(s) {\n  let t = clean(s);\n  for (let i = 0; i < 3; i++) {\n    const first = t.charAt(0);\n    const last = t.charAt(t.length - 1);\n    const pairs = { '\"': '\"', \"'\": \"'\", '(': ')', '[': ']', '{': '}' };\n    if (pairs[first] && pairs[first] === last) t = clean(t.slice(1, -1));\n  }\n  return t;\n}\n\nconst chatKey = String(data.chatId || '');\nconst defaultChatKey = String(staticData.defaultChatId || '');\nconst memoryKey = chatKey || defaultChatKey;\nconst pick = (...vals) => vals.map(v => String(v || '').trim()).find(Boolean) || '';\n\nconst explicitFromSlash = normalizeTopic(data.forcedTopic || data.debugTopicSources?.directArgs || '');\nconst args = normalizeTopic(pick(\n  explicitFromSlash,\n  data.action?.topic,\n  data.args,\n  staticData.pendingTrendTopicByChat[memoryKey],\n  staticData.latestSuggestedTopicByChat[memoryKey],\n  staticData.lastTrendByChat[memoryKey]\n));\n\nconst profile = staticData.creatorProfileByChat[chatKey] || staticData.creatorProfileByChat[defaultChatKey] || {};\nconst creatorImageUrl = pick(data.creatorImageUrl, profile.faceUrl);\nconst creatorVoiceId = pick(data.creatorVoiceId, profile.voiceId, 'GoLTMzQJAHarswiHqv3L');\n\nif (chatKey && args) {\n  staticData.pendingTrendTopicByChat[chatKey] = args;\n  staticData.latestSuggestedTopicByChat[chatKey] = args;\n  staticData.lastTrendByChat[chatKey] = args;\n}\n\nreturn [{\n  json: {\n    ...data,\n    args,\n    chatId: data.chatId,\n    messageId: data.messageId,\n    creatorImageUrl,\n    creatorVoiceId,\n    creatorProfileSet: Boolean(creatorImageUrl || creatorVoiceId)\n  }\n}];"
+      },
+      "id": "conv-0001-0000-0000-000000000007",
+      "name": "Prepare Video Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"perplexity/sonar-pro\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a UK dementia-care research analyst for Dignitate. Return strict JSON only. Keep one consistent topic and avoid speculation.\"\n    },\n    {\n      role: \"user\",\n      content:\n        \"Topic lock (do not change): \" + ($json.args || \"dementia caregiving support in the UK\") +\n        \"\\n\\nResearch this exact topic in the UK dementia care and carers context. Use recent and verifiable information (prefer 2024-2026 if available).\" +\n        \"\\nDo not invent numbers, dates, organizations, or claims.\" +\n        \"\\n\\nReturn strict JSON only with this schema:\" +\n        \"\\n{\" +\n        \"\\\"topic\\\":\\\"string\\\",\" +\n        \"\\\"summary\\\":\\\"6-8 sentence factual summary with one coherent storyline\\\",\" +\n        \"\\\"key_facts\\\":[{\\\"fact\\\":\\\"string\\\",\\\"source\\\":\\\"string\\\",\\\"date\\\":\\\"string\\\"}],\" +\n        \"\\\"carer_actions\\\":[\\\"string\\\",\\\"string\\\",\\\"string\\\",\\\"string\\\"],\" +\n        \"\\\"narrative_flow\\\":{\\\"slide1\\\":\\\"string\\\",\\\"slide2\\\":\\\"string\\\",\\\"slide3\\\":\\\"string\\\",\\\"slide4\\\":\\\"string\\\",\\\"slide5\\\":\\\"string\\\"},\" +\n        \"\\\"quality_checks\\\":{\\\"topic_match\\\":\\\"yes/no\\\",\\\"confidence\\\":\\\"high/medium/low\\\"}\" +\n        \"}\" +\n        \"\\n\\nRequirements:\" +\n        \"\\n- key_facts must contain 5 to 8 items.\" +\n        \"\\n- Every fact should include source and date text.\" +\n        \"\\n- Keep all facts on the same topic.\" +\n        \"\\n- carer_actions must contain 4 to 6 practical actions for carers in the UK.\" +\n        \"\\n- If evidence is limited, say so explicitly in summary.\"\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "research-0001-0000-0000-000000000001",
+      "name": "Research for Carousel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1180,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and normalize carousel research as structured data\nconst response = $input.first().json || {};\nconst content = response.choices?.[0]?.message?.content;\nconst rawText = Array.isArray(content)\n  ? content.map((c) => c?.text || '').join('\\n')\n  : String(content || response.output_text || response.text || '').trim();\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction parseJsonLoose(text) {\n  const t = String(text || '').trim();\n  if (!t) return null;\n\n  const stripped = t\n    .replace(/^\\x60\\x60\\x60json\\s*/i, '')\n    .replace(/^\\x60\\x60\\x60\\s*/i, '')\n    .replace(/\\x60\\x60\\x60$/i, '')\n    .trim();\n\n  try { return JSON.parse(stripped); } catch (e) {}\n\n  const start = stripped.indexOf('{');\n  const end = stripped.lastIndexOf('}');\n  if (start >= 0 && end > start) {\n    const mid = stripped.slice(start, end + 1);\n    try { return JSON.parse(mid); } catch (e) {}\n  }\n\n  return null;\n}\n\nlet carouselArgs = {};\ntry {\n  carouselArgs = $('Prepare Carousel Args').first().json || {};\n} catch (e) {\n  try { carouselArgs = $('Regeneration Started').first().json || {}; } catch (e2) {}\n}\n\nconst parsed = parseJsonLoose(rawText) || {};\nconst requestedTopic = clean(carouselArgs.args || parsed.topic || 'dementia caregiving support in the UK');\n\nconst rawFacts = Array.isArray(parsed.key_facts) ? parsed.key_facts : [];\nconst researchFacts = rawFacts\n  .map((f) => ({\n    fact: clean(f?.fact || f?.statement || f?.text || ''),\n    source: clean(f?.source || ''),\n    date: clean(f?.date || f?.year || '')\n  }))\n  .filter((f) => f.fact)\n  .slice(0, 8);\n\nif (!researchFacts.length) {\n  const lines = String(rawText || '')\n    .split(/\\n+/)\n    .map(clean)\n    .filter((l) => l.length > 35)\n    .slice(0, 5);\n  for (const line of lines) {\n    researchFacts.push({ fact: line, source: '', date: '' });\n  }\n}\n\nlet researchSummary = clean(parsed.summary || '');\nif (!researchSummary) {\n  researchSummary = clean(researchFacts.map((f) => f.fact).slice(0, 4).join(' '));\n}\nif (!researchSummary) {\n  researchSummary = clean(rawText).slice(0, 900) || 'No research available.';\n}\n\nconst rawActions = Array.isArray(parsed.carer_actions) ? parsed.carer_actions : [];\nlet researchActions = rawActions.map(clean).filter(Boolean).slice(0, 6);\nif (!researchActions.length) {\n  researchActions = [\n    'Ask your GP or memory service for a named contact and written care plan.',\n    'Create one weekly routine for medication, meals, hydration, and sleep.',\n    'Keep a symptom diary to support reviews with health and social care teams.',\n    'Use local carers support groups for practical and emotional support.'\n  ];\n}\n\nconst nf = parsed.narrative_flow && typeof parsed.narrative_flow === 'object' ? parsed.narrative_flow : {};\nconst narrativeFlow = {\n  slide1: clean(nf.slide1 || ''),\n  slide2: clean(nf.slide2 || ''),\n  slide3: clean(nf.slide3 || ''),\n  slide4: clean(nf.slide4 || ''),\n  slide5: clean(nf.slide5 || '')\n};\n\nconst citations = response.citations\n  || response.choices?.[0]?.message?.annotations?.map((a) => a?.url_citation?.url).filter(Boolean)\n  || [];\n\nreturn [{\n  json: {\n    ...carouselArgs,\n    args: requestedTopic,\n    requestedTopic,\n    researchRaw: rawText,\n    researchSummary,\n    researchFacts,\n    researchActions,\n    narrativeFlow,\n    citations,\n    researchModel: response.model || 'unknown'\n  }\n}];\n"
+      },
+      "id": "research-0001-0000-0000-000000000002",
+      "name": "Parse Carousel Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"perplexity/sonar-pro\",\n  messages: [\n    {\n      role: \"user\",\n      content:\n        \"Research the topic: \" + ($json.args || \"signs of caregiver burnout\") +\n        \" in the context of dementia care and caregiving in the UK. Include: recent statistics or studies (2024-2026), real stories or examples, expert advice from NHS or Alzheimer's Society, and emotional hooks for short-form video. Be factual and specific. Return a concise research summary in 200 words max.\"\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "research-0001-0000-0000-000000000003",
+      "name": "Research for Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1180,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract research text robustly and keep args/chat/profile context\nconst response = $input.first().json || {};\nconst content = response.choices?.[0]?.message?.content;\nconst research = (Array.isArray(content) ? content.map(c => c?.text || '').join('\\n') : content) || response.output_text || response.text || 'No research available.';\n\nlet videoArgs = {};\ntry { videoArgs = $('Prepare Video Args').first().json || {}; } catch (e) {\n  try { videoArgs = $('Video Regen Started').first().json || {}; } catch (e2) {}\n}\n\nconst citations = response.citations || response.choices?.[0]?.message?.annotations?.map(a => a?.url_citation?.url).filter(Boolean) || [];\nreturn [{\n  json: {\n    ...videoArgs,\n    research,\n    citations,\n    researchModel: response.model || 'unknown'\n  }\n}];\n"
+      },
+      "id": "research-0001-0000-0000-000000000004",
+      "name": "Parse Video Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic intent guard before Action Router, with strict topic locking\nconst data = $input.first().json || {};\nconst incoming = data.action || {};\nlet type = String(incoming.type || 'none').toLowerCase().trim();\nlet topic = String(incoming.topic || data.args || '').trim();\nlet autoAction = String(data.autoAction || '').toLowerCase().trim();\nlet topicSource = String(data.topicSource || '').toLowerCase().trim();\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeTopic(s) {\n  let t = clean(s);\n  for (let i = 0; i < 3; i++) {\n    const first = t.charAt(0);\n    const last = t.charAt(t.length - 1);\n    const pairs = { '\"': '\"', \"'\": \"'\", '(': ')', '[': ']', '{': '}' };\n    if (pairs[first] && pairs[first] === last) t = clean(t.slice(1, -1));\n  }\n  return t;\n}\n\nlet raw = '';\nlet chatId = String(data.chatId || '');\ntry {\n  const load = $('Load Chat History').first().json || {};\n  raw = String(load.message || '');\n  if (!chatId) chatId = String(load.chatId || '');\n} catch (e) {}\nconst msg = raw.toLowerCase();\nconst isSlashMessage = raw.trim().startsWith('/');\n\nconst command = String(data.command || '').toLowerCase().trim();\nconst directArgs = normalizeTopic(data.forcedTopic || data.debugTopicSources?.directArgs || '');\n\ntopic = normalizeTopic(topic);\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.userMemory) staticData.userMemory = {};\nif (!staticData.pendingAutoActionByChat) staticData.pendingAutoActionByChat = {};\n\nconst chatKey = String(chatId || '');\nconst defaultChatKey = String(staticData.defaultChatId || '');\nconst memoryKey = chatKey || defaultChatKey;\nconst pick = (...vals) => vals.map(v => normalizeTopic(v)).find(Boolean) || '';\n\nconst handledExternally = new Set(['/commands', '/cmds', '/auto', '/creator', '/setface', '/setvoiceid']);\nif (handledExternally.has(command)) {\n  return [{\n    json: {\n      ...data,\n      chatId,\n      action: { type: 'none', topic: '' },\n      args: '',\n      autoAction: '',\n      topicSource: 'command',\n      debugEnsureTopic: {\n        chatKey,\n        command,\n        topicResolved: '',\n        topicSource: 'command',\n        autoAction: ''\n      }\n    }\n  }];\n}\n\nif ((command === '/carousel' || command === '/video') && type !== 'trends') {\n  type = command.slice(1);\n  if (directArgs) {\n    topic = directArgs;\n    topicSource = 'direct';\n  }\n}\n\nif (!autoAction && chatKey) {\n  autoAction = String(staticData.pendingAutoActionByChat?.[chatKey] || '').toLowerCase().trim();\n}\nif (!['carousel', 'video'].includes(autoAction)) autoAction = '';\n\nif (type === 'none' && !isSlashMessage) {\n  const wantsTrends = /(trend|trending|latest news|latest trends|what should .*post|what to post|news)/i.test(msg);\n  const wantsApprove = /(approve|post it|publish|go live|looks good,? post|ship it)/i.test(msg);\n  const wantsRegenerate = /(regenerate|redo|try again|another version|rewrite|new version)/i.test(msg);\n  const wantsStatus = /(status|are you online|bot status|system status|health check)/i.test(msg);\n  const wantsHelp = /(^help$|\\bhelp\\b|what can you do|how do you work|commands)/i.test(msg);\n  const wantsCarousel = /(carousel|carousels|slides|instagram post|instagram carousel)/i.test(msg);\n  const wantsVideo = /(video|reel|reels|tiktok|shorts?)/i.test(msg);\n\n  if (wantsTrends) type = 'trends';\n  else if (wantsApprove) type = 'approve';\n  else if (wantsRegenerate) type = 'regenerate';\n  else if (wantsStatus) type = 'status';\n  else if (wantsHelp) type = 'help';\n  else if (wantsCarousel && wantsVideo) type = 'both';\n  else if (wantsCarousel) type = 'carousel';\n  else if (wantsVideo) type = 'video';\n}\n\nif (!topic && ['carousel', 'video', 'both'].includes(type)) {\n  const m = raw.match(/\\/(?:carousel|video)(?:@[A-Za-z0-9_]+)?\\s+([\\s\\S]+)$/i)\n    || raw.match(/\\b(?:about|on|for)\\s+(.+)$/i);\n  if (m?.[1]) {\n    topic = normalizeTopic(m[1].replace(/[.!?]+$/g, ''));\n    topicSource = topicSource || 'message';\n  }\n}\n\nif (!topic && ['carousel', 'video', 'both'].includes(type)) {\n  topic = pick(\n    data.args,\n    incoming.topic,\n    staticData.pendingTrendTopicByChat[memoryKey],\n    staticData.latestSuggestedTopicByChat[memoryKey],\n    staticData.lastTrendByChat[memoryKey]\n  );\n  if (topic) topicSource = topicSource || 'memory';\n}\n\nif (!topic && ['carousel', 'video', 'both'].includes(type)) {\n  autoAction = type === 'both' ? 'carousel' : type;\n  type = 'trends';\n  if (chatKey) staticData.pendingAutoActionByChat[chatKey] = autoAction;\n}\n\nif (topic && ['carousel', 'video', 'both'].includes(type) && chatKey) {\n  staticData.userMemory[chatKey] = {\n    ...(staticData.userMemory[chatKey] || {}),\n    lastAction: type,\n    lastTopic: topic,\n    updatedAt: Date.now()\n  };\n\n  if (topicSource === 'direct' || topicSource === 'message' || topicSource === 'reply') {\n    staticData.pendingTrendTopicByChat[chatKey] = topic;\n    staticData.latestSuggestedTopicByChat[chatKey] = topic;\n    staticData.lastTrendByChat[chatKey] = topic;\n  }\n}\n\nconst debugEnsureTopic = {\n  chatKey,\n  memoryKey,\n  typeBeforeFinal: type,\n  topicResolved: topic,\n  topicSource,\n  pendingByChat: String(staticData.pendingTrendTopicByChat?.[chatKey] || ''),\n  latestByChat: String(staticData.latestSuggestedTopicByChat?.[chatKey] || ''),\n  lastByChat: String(staticData.lastTrendByChat?.[chatKey] || ''),\n  autoAction,\n  forcedTopic: directArgs,\n  command\n};\n\nreturn [{\n  json: {\n    ...data,\n    chatId,\n    action: { type, topic },\n    args: topic || data.args || '',\n    autoAction,\n    topicSource,\n    debugEnsureTopic\n  }\n}];"
+      },
+      "id": "conv-0001-0000-0000-000000000205",
+      "name": "Ensure Action Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst clean = (s) => String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingTrendTopicByChat) staticData.pendingTrendTopicByChat = {};\nif (!staticData.latestSuggestedTopicByChat) staticData.latestSuggestedTopicByChat = {};\nif (!staticData.lastTrendByChat) staticData.lastTrendByChat = {};\nif (!staticData.userMemory) staticData.userMemory = {};\nif (!staticData.globalSuggestedTopic) staticData.globalSuggestedTopic = '';\n\nreturn items.map((item, index) => {\n  const d = item.json || {};\n\n  const title = clean(d.title || d.topic || 'Untitled topic').slice(0, 180);\n  const summary = clean(d.summary || d.description || 'No summary available.').slice(0, 1200);\n  const category = clean(d.category || 'caregiving');\n  const region = clean(d.region || 'UK');\n\n  let score = Number(d.engagement_score ?? d.engagementScore ?? 7);\n  if (!Number.isFinite(score)) score = 7;\n  score = Math.max(1, Math.min(10, Math.round(score)));\n\n  const rank = Number.isFinite(Number(d.rank)) ? Number(d.rank) : (index + 1);\n  const total = Number.isFinite(Number(d.totalTopics)) ? Number(d.totalTopics) : items.length;\n\n  const trendMessage = [\n    `Trending Topic ${rank}/${total}:`,\n    '',\n    title,\n    '',\n    summary,\n    '',\n    `Category: ${category}`,\n    `Region: ${region}`,\n    `Engagement Score: ${score}/10`,\n    '',\n    'Tap one of the buttons below to generate content for this exact topic.',\n    'Workflow build: 2026-02-11-static-inline-buttons-modefix',\n    'Manual fallback: type carousel + topic or video + topic'\n  ].join('\\n');\n\n  const chatKey = String(d.chatId || staticData.defaultChatId || '');\n  if (chatKey && title) {\n    staticData.pendingTrendTopicByChat[chatKey] = title;\n    staticData.latestSuggestedTopicByChat[chatKey] = title;\n    staticData.lastTrendByChat[chatKey] = title;\n    staticData.globalSuggestedTopic = title;\n    staticData.userMemory[chatKey] = {\n      ...(staticData.userMemory[chatKey] || {}),\n      lastTopic: title,\n      lastAction: 'trends',\n      updatedAt: Date.now()\n    };\n  }\n\n  return {\n    json: {\n      ...d,\n      title,\n      summary,\n      category,\n      region,\n      engagement_score: score,\n      rank,\n      totalTopics: total,\n      trendMessage,\n      callbackCarousel: '/carousel',\n      callbackVideo: '/video'\n    }\n  };\n});\n"
+      },
+      "id": "trend-0001-0000-0000-000000000001",
+      "name": "Format Trend Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst apiKey = 'fd30e6ca-bdaa-4def-98e7-cecf03482256:172858bdfaed85c84b8ae2fb4e26cf7c';\nconst modelPath = 'fal-ai/nano-banana-pro';\nconst headers = { Authorization: 'Key ' + apiKey };\n\nconst pollIntervalMs = 1400;\nconst maxChecks = 40;\nconst maxWaitMs = 56000;\n\nconst httpRequest =\n  (typeof $httpRequest === 'function' && $httpRequest) ||\n  (this && this.helpers && typeof this.helpers.httpRequest === 'function'\n    ? this.helpers.httpRequest.bind(this)\n    : null);\n\nif (!httpRequest) {\n  throw new Error('n8n HTTP helper is unavailable in this Code node runtime.');\n}\n\nconst sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));\n\nfunction readStatus(json) {\n  return String(\n    (json &&\n      (json.status ||\n        json.request_status ||\n        json.state ||\n        json.phase ||\n        (json.data && json.data.status) ||\n        (json.result && json.result.status))) ||\n      ''\n  ).toUpperCase();\n}\n\nfunction readQueuePos(json) {\n  const v = json?.queue_position ?? json?.data?.queue_position ?? null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction normalizeImages(payload) {\n  const out = [];\n  const seen = new Set();\n\n  function pushUrl(v) {\n    const u = String(v || '').trim();\n    if (!u || !/^https?:\\/\\//i.test(u) || seen.has(u)) return;\n    seen.add(u);\n    out.push({ url: u });\n  }\n\n  function consume(node, depth = 0) {\n    if (!node || depth > 5) return;\n\n    if (Array.isArray(node)) {\n      for (const x of node) consume(x, depth + 1);\n      return;\n    }\n\n    if (typeof node === 'string') {\n      pushUrl(node);\n      return;\n    }\n\n    if (typeof node !== 'object') return;\n\n    if (typeof node.url === 'string') pushUrl(node.url);\n    if (typeof node.image_url === 'string') pushUrl(node.image_url);\n    if (typeof node.imageUrl === 'string') pushUrl(node.imageUrl);\n\n    if (Array.isArray(node.images)) consume(node.images, depth + 1);\n    if (Array.isArray(node.outputs)) consume(node.outputs, depth + 1);\n    if (Array.isArray(node.output)) consume(node.output, depth + 1);\n\n    if (node.data) consume(node.data, depth + 1);\n    if (node.result) consume(node.result, depth + 1);\n    if (node.response) consume(node.response, depth + 1);\n\n    if (node.image) consume(node.image, depth + 1);\n  }\n\n  consume(payload);\n  return out;\n}\n\nasync function getStatus(requestId) {\n  const url = 'https://queue.fal.run/' + modelPath + '/requests/' + encodeURIComponent(requestId) + '/status';\n  return await httpRequest({ method: 'GET', url, headers, json: true });\n}\n\nasync function getResult(requestId) {\n  const url = 'https://queue.fal.run/' + modelPath + '/requests/' + encodeURIComponent(requestId);\n  return await httpRequest({ method: 'GET', url, headers, json: true });\n}\n\nasync function waitForOne(item) {\n  const inputJson = item.json || {};\n  const requestId = inputJson.request_id || inputJson.requestId;\n\n  const syncImages = normalizeImages(inputJson);\n  if (syncImages.length) {\n    return { json: { ...inputJson, images: syncImages, falStatus: 'COMPLETED_SYNC', falPollAttempts: 0 } };\n  }\n\n  if (!requestId) {\n    throw new Error('fal.ai submit did not return request_id.');\n  }\n\n  const startedAt = Date.now();\n  let attempts = 0;\n  let statusValue = '';\n  let lastQueuePosition = null;\n\n  while (attempts < maxChecks && (Date.now() - startedAt) < maxWaitMs) {\n    attempts++;\n\n    let statusJson;\n    try {\n      statusJson = await getStatus(requestId);\n    } catch (err) {\n      throw new Error('fal.ai status request failed for request ' + requestId + ': ' + String(err.message || err));\n    }\n\n    statusValue = readStatus(statusJson);\n    lastQueuePosition = readQueuePos(statusJson);\n\n    if (statusValue === 'COMPLETED') break;\n    if (['FAILED', 'ERROR', 'CANCELLED'].includes(statusValue)) {\n      throw new Error('fal.ai request ' + requestId + ' failed with status ' + statusValue + '.');\n    }\n\n    const elapsed = Date.now() - startedAt;\n    const remaining = maxWaitMs - elapsed;\n    if (remaining <= 0) break;\n    await sleep(Math.min(pollIntervalMs, remaining));\n  }\n\n  if (statusValue !== 'COMPLETED') {\n    try {\n      const finalStatusJson = await getStatus(requestId);\n      statusValue = readStatus(finalStatusJson) || statusValue;\n      lastQueuePosition = readQueuePos(finalStatusJson) ?? lastQueuePosition;\n    } catch (e) {\n      // ignore\n    }\n  }\n\n  let resultJson = null;\n  if (statusValue === 'COMPLETED') {\n    try {\n      resultJson = await getResult(requestId);\n    } catch (err) {\n      throw new Error('fal.ai result request failed for request ' + requestId + ': ' + String(err.message || err));\n    }\n  } else {\n    try {\n      const possible = await getResult(requestId);\n      const hasImages = normalizeImages(possible).length > 0;\n      if (hasImages) {\n        resultJson = possible;\n        statusValue = 'COMPLETED_LATE';\n      }\n    } catch (e) {\n      // no-op\n    }\n  }\n\n  if (!resultJson || typeof resultJson !== 'object') {\n    const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));\n    throw new Error(\n      'fal.ai request ' + requestId + ' is still ' + (statusValue || 'IN_QUEUE') +\n      ' after ' + attempts + ' checks (~' + seconds + 's), queue_position=' +\n      (lastQueuePosition == null ? 'n/a' : lastQueuePosition) +\n      '. Queue is busy. Retry /carousel in 1-2 minutes.'\n    );\n  }\n\n  const normalized = normalizeImages(resultJson);\n  const merged = {\n    ...inputJson,\n    ...resultJson,\n    images: normalized,\n    request_id: requestId,\n    falStatus: statusValue || 'COMPLETED',\n    falPollAttempts: attempts,\n  };\n\n  if (!normalized.length) {\n    merged.falError = 'fal.ai completed but returned no image URLs in supported fields.';\n  }\n\n  return { json: merged };\n}\n\nconst out = [];\nlet lastError = null;\n\nfor (const item of items) {\n  try {\n    out.push(await waitForOne(item));\n  } catch (err) {\n    lastError = err;\n    out.push({\n      json: {\n        ...(item.json || {}),\n        falStatus: 'ERROR',\n        falError: String(err.message || err),\n        images: []\n      }\n    });\n  }\n}\n\nconst anyImages = out.some((o) => {\n  const j = o.json || {};\n  return Array.isArray(j.images) && j.images.length > 0;\n});\n\nif (!anyImages && lastError) {\n  throw lastError;\n}\n\nreturn out;",
+        "mode": "runOnceForAllItems",
+        "language": "javaScript"
+      },
+      "id": "fal-await-image-result-v1",
+      "name": "fal.ai - Await Image Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// If /carousel or /video had no saved topic, continue automatically after fresh trend is sent.\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.pendingAutoActionByChat) staticData.pendingAutoActionByChat = {};\n\nlet trend = {};\ntry { trend = $('Format Trend Message').first().json || {}; } catch (e) {}\n\nconst chatKey = String(trend.chatId || staticData.defaultChatId || '');\nif (!chatKey) return [];\n\nconst autoAction = String(staticData.pendingAutoActionByChat[chatKey] || '').toLowerCase().trim();\nif (!['carousel', 'video'].includes(autoAction)) return [];\n\nconst topic = String(trend.title || trend.topic || '').trim();\nif (!topic) return [];\n\n// Consume one-shot auto action to avoid repeated triggers.\nstaticData.pendingAutoActionByChat[chatKey] = '';\n\nreturn [{\n  json: {\n    ...trend,\n    chatId: trend.chatId,\n    messageId: trend.messageId,\n    args: topic,\n    action: { type: autoAction, topic },\n    autoAction\n  }\n}];"
+      },
+      "id": "trend-auto-continue-code-v1",
+      "name": "Auto Continue From Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction clean(s) {\n  return String(s || '').replace(/[\\r\\n]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction stripPaletteNoise(text) {\n  let t = clean(text);\n  if (!t) return t;\n  t = t\n    .replace(/#[0-9a-f]{3,8}\\b/gi, '')\n    .replace(/\\b(?:rgb|rgba|hsl|hsla|cmyk)\\s*\\([^)]*\\)/gi, '')\n    .replace(/\\b(?:hex\\s*codes?|hex|palette|swatch(?:es)?|colour\\s*swatch(?:es)?|color\\s*chip(?:s)?|colour\\s*chip(?:s)?|color\\s*bar(?:s)?|colour\\s*bar(?:s)?|legend|style\\s*tile|moodboard|footer\\s*strip(?:s)?|sample\\s*strip)\\b/gi, '')\n    .replace(/\\s{2,}/g, ' ')\n    .trim();\n  return t;\n}\n\nfunction sanitizeSceneHint(text) {\n  let t = stripPaletteNoise(text);\n  if (!t) return '';\n\n  t = t\n    .replace(/\\b(collage|grid|mosaic|split\\s*screen|diptych|triptych|quad\\s*panel|four\\s*panel|multi\\s*panel|storyboard|contact\\s*sheet|comic\\s*panel|tiled?)\\b/gi, '')\n    .replace(/\\s{2,}/g, ' ')\n    .trim();\n\n  const words = t.split(/\\s+/).filter(Boolean);\n  if (words.length < 6) return '';\n  if (/\\b(bottom|footer|strip|swatch|palette|hex|chip|legend|design\\s*board)\\b/i.test(t)) return '';\n\n  return t;\n}\n\nfunction hashSeed(text) {\n  const src = clean(text) || 'dignitate';\n  let acc = 0;\n  for (let i = 0; i < src.length; i++) {\n    acc = (acc * 131 + src.charCodeAt(i)) % 1000000000;\n  }\n  return Math.abs(acc);\n}\n\nfunction deriveHeadingBody(text, fallbackHeading) {\n  const t = clean(text);\n  if (!t) return { heading: clean(fallbackHeading || 'Dementia Care Update'), body: '' };\n\n  let heading = '';\n  let body = '';\n\n  const colon = t.indexOf(':');\n  if (colon > 0 && colon < 120) {\n    heading = clean(t.slice(0, colon));\n    body = clean(t.slice(colon + 1));\n  }\n\n  if (!heading) {\n    const words = t.split(/\\s+/).filter(Boolean);\n    heading = words.slice(0, Math.min(8, words.length)).join(' ');\n    body = clean(words.slice(Math.min(8, words.length)).join(' '));\n  }\n\n  const headingWords = heading.split(/\\s+/).filter(Boolean);\n  if (headingWords.length > 10) heading = headingWords.slice(0, 10).join(' ');\n  if (!body) body = t;\n  if (body.length > 160) body = body.slice(0, 157) + '...';\n\n  return { heading: clean(heading), body: clean(body) };\n}\n\nreturn items.map((item) => {\n  const d = item.json || {};\n\n  const title = clean(d.title) || 'Dignitate Dementia Care Update';\n  const topic = clean(d.args || d.title) || 'dementia care support in the UK';\n  const slideIndex = Number(d.slideIndex || 0);\n  const totalSlides = Number(d.totalSlides || 5);\n  const role = String(d.slideRole || (slideIndex === 0 ? 'cover' : (slideIndex === totalSlides - 1 ? 'conclusion' : 'information'))).toLowerCase();\n\n  const rawScene = clean(d.imagePrompt) || clean(d.slideText) || ('Compassionate UK caregiving moment about ' + topic);\n  const sceneHint = sanitizeSceneHint(rawScene) || ('Compassionate UK caregiving moment in the UK, one professional and one carer in a clean setting about ' + topic);\n\n  let slideText = clean(d.slideText) || clean(d.title) || 'Dementia Care Support';\n  if (slideText.length > 260) slideText = slideText.slice(0, 257) + '...';\n\n  let { heading, body } = deriveHeadingBody(slideText, title);\n\n  if (role === 'cover') {\n    heading = clean(title).split(/\\s+/).slice(0, 8).join(' ') || heading;\n    if (!body) body = 'Research-backed update for carers and families in the UK.';\n    if (body.length > 110) body = body.slice(0, 107) + '...';\n  }\n\n  if (role === 'conclusion') {\n    if (!heading) heading = 'Conclusion';\n    if (!/key takeaway/i.test(body)) {\n      body = (body ? body + ' ' : '') + 'Key takeaway: practical support and early action help carers and families.';\n    }\n    if (body.length > 150) body = body.slice(0, 147) + '...';\n  }\n\n  const designSystem = [\n    'Create exactly ONE single 4:5 portrait slide image',\n    'Dignitate style: UK research-led dementia care communication for cultural carers',\n    'Series consistency lock: all slides use the same design language, text treatment, and composition rules',\n    'Fixed layout for every slide: top text panel and bottom realistic photo panel, identical spacing and margins',\n    'professional, factual, compassionate healthcare editorial aesthetic',\n    'NO collage, NO grid, NO split-screen, NO multi-panel, NO storyboard, NO duplicate mini-slides, NO tiled layout',\n    'NO rendered color swatches, NO palette chips, NO color bars, NO legends, NO footer strips, NO sample strip at bottom',\n    'NO hex code text, NO RGB/HSL/CMYK labels, NO design-board elements',\n    'clean geometric sans-serif typography, high readability, high contrast',\n    'NO handwriting, NO cursive, NO calligraphy, NO brush script',\n    'NO hashtags on image, NO slide numbering text, NO logos, NO watermarks, NO signatures',\n    'realistic UK dementia care and carer context, clean environment, clear margins for text',\n    'Keep all text inside safe margins with no clipping or overlap',\n    'Bottom edge of the image must be natural photo content only, never decorative bars'\n  ];\n\n  const roleStyle = role === 'cover'\n    ? [\n        'COVER SLIDE layout',\n        'Typography hierarchy mandatory: very large bold headline, short subheading only',\n        'No dense paragraph blocks and no chart-heavy layouts'\n      ]\n    : role === 'conclusion'\n      ? [\n          'CONCLUSION SLIDE layout',\n          'Clear closing statement with one practical next-step message',\n          'Headline prominent, body concise and reassuring'\n        ]\n      : [\n          'INFORMATION SLIDE layout',\n          'One clear factual point with readable support text',\n          'Balanced headline and body text hierarchy'\n        ];\n\n  const continuity = 'Series continuity lock: same topic, same template, same visual style across all 5 slides for \"' + title + '\". Current slide ' + (slideIndex + 1) + ' of ' + totalSlides + ' (' + role + ').';\n\n  const prompt = [\n    'Topic: ' + topic + '.',\n    continuity,\n    'Scene: ' + sceneHint + '.',\n    ...designSystem,\n    ...roleStyle,\n    'Use these exact text blocks only:',\n    'Headline: \"' + heading + '\".',\n    'Body: \"' + body + '\".',\n    'Preserve the meaning of this source text: \"' + slideText + '\".'\n  ].join(' ');\n\n  const baseSeed = hashSeed('DIGNITATE_STYLE_LOCK_V3|' + title + '|' + topic);\n  const falSeed = baseSeed;\n\n  return {\n    json: {\n      ...d,\n      slideRole: role,\n      slideHeading: heading,\n      slideBody: body,\n      falPrompt: prompt,\n      falSeed,\n      falPromptPreview: prompt.slice(0, 700)\n    }\n  };\n});"
+      },
+      "id": "fal-build-prompt-v2",
+      "name": "Build fal.ai Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json || {};\nlet raw = '';\ntry { raw = String($('Load Chat History').first().json.message || '').trim(); } catch (e) {}\nif (!raw) return [{ json: data }];\n\nconst isAuto = /^\\/auto(?:\\b|$)/i.test(raw);\nconst isCommands = /^\\/(commands|cmds)(?:\\b|$)/i.test(raw);\nconst isCreator = /^\\/(setface|setvoiceid|creator)(?:\\b|$)/i.test(raw);\nif (!isAuto && !isCommands && !isCreator) return [{ json: data }];\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.autoScheduleByChat) staticData.autoScheduleByChat = {};\nif (!staticData.pendingAutoActionByChat) staticData.pendingAutoActionByChat = {};\nif (!staticData.creatorProfileByChat) staticData.creatorProfileByChat = {};\nif (!staticData.defaultChatId && data.chatId) staticData.defaultChatId = String(data.chatId);\n\nconst chatKey = String(data.chatId || staticData.defaultChatId || '');\nif (!chatKey) {\n  return [{ json: { ...data, action: { type: 'none', topic: '' }, args: '', replyText: 'Could not identify chat for setup.' } }];\n}\n\nconst creatorDefaults = {\n  faceUrl: '',\n  voiceId: 'GoLTMzQJAHarswiHqv3L',\n  updatedAt: Date.now(),\n};\nconst creatorCfg = {\n  ...creatorDefaults,\n  ...(staticData.creatorProfileByChat[chatKey] || {}),\n};\n\nconst cfg = {\n  enabled: false,\n  timezoneOffset: '+00:00',\n  carouselTime: '09:00',\n  videoTime: '18:00',\n  fixedTopic: '',\n  lastRun: {},\n  ...(staticData.autoScheduleByChat[chatKey] || {}),\n  updatedAt: Date.now(),\n};\n\nconst botFatherCommands = [\n  'carousel - Create carousel from topic',\n  'video - Create video from topic',\n  'trends - Get latest trend topic',\n  'approve - Approve pending draft',\n  'regenerate - Regenerate pending draft',\n  'status - Check bot status',\n  'help - Show help',\n  'setface - Set creator face image URL',\n  'setvoiceid - Set ElevenLabs voice ID',\n  'creator - Show creator profile',\n  'commands - Show command list'\n].join('\\n');\n\nfunction isHttpUrl(v) {\n  return /^https?:\\/\\//i.test(String(v || '').trim());\n}\n\nif (isAuto) {\n  cfg.enabled = false;\n  cfg.updatedAt = Date.now();\n  staticData.autoScheduleByChat[chatKey] = cfg;\n  staticData.pendingAutoActionByChat[chatKey] = '';\n  staticData.creatorProfileByChat[chatKey] = creatorCfg;\n\n  return [{\n    json: {\n      ...data,\n      action: { type: 'none', topic: '' },\n      args: '',\n      replyText: [\n        'Auto mode is temporarily disabled.',\n        'Use manual commands for now:',\n        '/carousel <topic>',\n        '/video <topic>',\n        '/trends'\n      ].join('\\n')\n    }\n  }];\n}\n\nif (isCommands) {\n  staticData.autoScheduleByChat[chatKey] = cfg;\n  staticData.pendingAutoActionByChat[chatKey] = '';\n  staticData.creatorProfileByChat[chatKey] = creatorCfg;\n\n  return [{\n    json: {\n      ...data,\n      action: { type: 'none', topic: '' },\n      args: '',\n      replyText: [\n        'Available commands:',\n        '/carousel <topic>',\n        '/video <topic>',\n        '/trends',\n        '/approve',\n        '/regenerate',\n        '/status',\n        '/help',\n        '/setface <public_image_url>',\n        '/setvoiceid <elevenlabs_voice_id>',\n        '/creator',\n        '',\n        'Auto mode is currently disabled.',\n        '',\n        'To show commands in Telegram / menu, use @BotFather /setcommands and paste:',\n        botFatherCommands\n      ].join('\\n')\n    }\n  }];\n}\n\nconst cmd = String(raw.split(/\\s+/)[0] || '').toLowerCase();\nlet reply = '';\n\nif (cmd === '/creator') {\n  reply = [\n    'CREATOR PROFILE',\n    '',\n    'Face URL: ' + (creatorCfg.faceUrl || 'not set'),\n    'Voice ID: ' + (creatorCfg.voiceId || 'not set'),\n    '',\n    'Commands:',\n    '/setface <public_image_url>',\n    '/setvoiceid <elevenlabs_voice_id>',\n    '/creator'\n  ].join('\\n');\n} else if (cmd === '/setface') {\n  const url = raw.replace(/^\\/setface\\s*/i, '').trim();\n  if (!url || !isHttpUrl(url)) {\n    reply = 'Invalid face image URL. Use: /setface https://...';\n  } else {\n    creatorCfg.faceUrl = url;\n    creatorCfg.updatedAt = Date.now();\n    reply = 'Creator face image saved for future videos.';\n  }\n} else if (cmd === '/setvoiceid') {\n  const voiceId = raw.replace(/^\\/setvoiceid\\s*/i, '').trim();\n  if (!voiceId || /\\s/.test(voiceId) || voiceId.length < 6) {\n    reply = 'Invalid voice ID. Use: /setvoiceid <elevenlabs_voice_id>';\n  } else {\n    creatorCfg.voiceId = voiceId;\n    creatorCfg.updatedAt = Date.now();\n    reply = 'Creator voice ID saved for future videos.';\n  }\n}\n\ncfg.enabled = false;\ncfg.updatedAt = Date.now();\nstaticData.autoScheduleByChat[chatKey] = cfg;\nstaticData.pendingAutoActionByChat[chatKey] = '';\nstaticData.creatorProfileByChat[chatKey] = creatorCfg;\n\nreturn [{\n  json: {\n    ...data,\n    action: { type: 'none', topic: '' },\n    args: '',\n    replyText: reply || 'Creator command updated.',\n    creatorProfile: creatorCfg\n  }\n}];"
+      },
+      "id": "auto-mode-handler-v1",
+      "name": "Handle Auto Mode Commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{`Image ${$json.slideIndex || 1}/${$json.totalSlides || 1}:\n${$json.imageUrl || \"\"}`}}",
+        "additionalFields": {
+          "disableWebPagePreview": false
+        }
+      },
+      "id": "send-image-fallback-v1",
+      "name": "Send Image URL Fallback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "BCYLgnIRm18fvabJ",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.imageUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "image/*"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (n8n Telegram Image Fetch)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "download-carousel-image-binary-v1",
+      "name": "Download Carousel Image Binary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1880,
+        260
+      ],
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Chat History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Chat History": {
+      "main": [
+        [
+          {
+            "node": "Is Slash Command?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Slash Command?": {
+      "main": [
+        [
+          {
+            "node": "Quick Parse Slash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quick Parse Slash": {
+      "main": [
+        [
+          {
+            "node": "Handle Auto Mode Commands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Conversation": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quick Parse Slash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Send AI Reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ensure Action Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Router": {
+      "main": [
+        [
+          {
+            "node": "Prepare Carousel Args",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Video Args",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Carousel Args",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Video Args",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OpenRouter - Trends",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Regeneration",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Help Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare Carousel Args": {
+      "main": [
+        [
+          {
+            "node": "Research for Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research for Carousel": {
+      "main": [
+        [
+          {
+            "node": "Parse Carousel Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Carousel Research": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter - Carousel Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Video Args": {
+      "main": [
+        [
+          {
+            "node": "Research for Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research for Video": {
+      "main": [
+        [
+          {
+            "node": "Parse Video Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Video Research": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter - Video Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Scheduled Trends Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled Trends Prep": {
+      "main": [
+        [
+          {
+            "node": "Action Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter - Carousel Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Carousel Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter - Video Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Video Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter - Trends": {
+      "main": [
+        [
+          {
+            "node": "Parse Trends Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Carousel Response": {
+      "main": [
+        [
+          {
+            "node": "Carousel - Status Update",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Slides",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Video Response": {
+      "main": [
+        [
+          {
+            "node": "Video - Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Trends Response": {
+      "main": [
+        [
+          {
+            "node": "Format Trend Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carousel - Status Update": {
+      "main": [
+        []
+      ]
+    },
+    "Split Slides": {
+      "main": [
+        [
+          {
+            "node": "Build fal.ai Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai - Submit Image": {
+      "main": [
+        [
+          {
+            "node": "fal.ai - Await Image Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Images": {
+      "main": [
+        [
+          {
+            "node": "Package Carousel Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package Carousel Data": {
+      "main": [
+        [
+          {
+            "node": "Store Pending Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Pending Carousel": {
+      "main": [
+        [
+          {
+            "node": "Send Carousel for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Carousel for Approval": {
+      "main": [
+        [
+          {
+            "node": "Split Remaining Images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Remaining Images": {
+      "main": [
+        [
+          {
+            "node": "Download Carousel Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video - Status Update": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs - Create Voiceover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs - Create Voiceover": {
+      "main": [
+        [
+          {
+            "node": "Prepare Video Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Video Scenes": {
+      "main": [
+        [
+          {
+            "node": "Kling v3 - Generate Clip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Clips": {
+      "main": [
+        [
+          {
+            "node": "Package Video Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package Video Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Render Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Render Data": {
+      "main": [
+        [
+          {
+            "node": "Trigger GitHub Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger GitHub Actions": {
+      "main": [
+        [
+          {
+            "node": "Video - Rendering Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Approval": {
+      "main": [
+        [
+          {
+            "node": "Content Type Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Type Router": {
+      "main": [
+        [
+          {
+            "node": "Approval Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Video Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Approval Confirmed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Post Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Post Data": {
+      "main": [
+        [
+          {
+            "node": "Composio - Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composio - Instagram": {
+      "main": [
+        [
+          {
+            "node": "Composio - LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composio - LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Composio - X/Twitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composio - X/Twitter": {
+      "main": [
+        [
+          {
+            "node": "Check Post Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Post Results": {
+      "main": [
+        [
+          {
+            "node": "Post Results Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Approved": {
+      "main": [
+        [
+          {
+            "node": "Video - Clips Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video - Clips Ready": {
+      "main": [
+        [
+          {
+            "node": "Split Clip URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Clip URLs": {
+      "main": [
+        [
+          {
+            "node": "Send Clip URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Regeneration": {
+      "main": [
+        [
+          {
+            "node": "Regen Type Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regen Type Router": {
+      "main": [
+        [
+          {
+            "node": "Regeneration Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Video Regen Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Regeneration Started": {
+      "main": [
+        [
+          {
+            "node": "Prepare Carousel Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Regen Started": {
+      "main": [
+        [
+          {
+            "node": "Prepare Video Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Action Intent": {
+      "main": [
+        [
+          {
+            "node": "Action Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Trend Message": {
+      "main": [
+        [
+          {
+            "node": "Trends - Send Topic",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Auto Continue From Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trends - Send Topic": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai - Await Image Result": {
+      "main": [
+        [
+          {
+            "node": "Collect Images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Continue From Trends": {
+      "main": [
+        [
+          {
+            "node": "Action Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build fal.ai Prompt": {
+      "main": [
+        [
+          {
+            "node": "fal.ai - Submit Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Auto Mode Commands": {
+      "main": [
+        [
+          {
+            "node": "Send AI Reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ensure Action Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Remaining Images": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Send Image URL Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Carousel Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Send Remaining Images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Image URL Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kling v3 - Generate Clip": {
+      "main": [
+        [
+          {
+            "node": "Collect All Clips",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 2
+}

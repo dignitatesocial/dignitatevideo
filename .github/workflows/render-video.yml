@@ -1,0 +1,47 @@
+name: Render Dignitate Video
+
+on:
+  repository_dispatch:
+    types: [render-video]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: remotion-video/package.json
+
+      - name: Install dependencies
+        working-directory: remotion-video
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chrome for Remotion
+        run: npx remotion browser ensure
+
+      - name: Render video
+        working-directory: remotion-video
+        env:
+          INPUT_PROPS: ${{ toJson(github.event.client_payload) }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
+          N8N_WEBHOOK_URL: ${{ secrets.N8N_WEBHOOK_URL }}
+        run: npx tsx src/render.ts
+
+      - name: Upload artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-debug
+          path: /tmp/remotion-render/
+          retention-days: 1

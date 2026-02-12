@@ -1,0 +1,26 @@
+{
+  "name": "dignitate-remotion-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "tsx src/render.ts",
+    "studio": "remotion studio src/index.ts",
+    "build": "remotion bundle src/index.ts"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.268"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "^4.0.268",
+    "@remotion/cli": "^4.0.268",
+    "@remotion/renderer": "^4.0.268",
+    "@types/node": "^22.13.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}
