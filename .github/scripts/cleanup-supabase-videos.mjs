@@ -2,7 +2,8 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$
 const SUPABASE_SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const SUPABASE_BUCKET = String(process.env.SUPABASE_BUCKET || 'videos').trim();
 const SUPABASE_PREFIX = String(process.env.SUPABASE_PREFIX || 'videos').trim().replace(/^\/+|\/+$/g, '');
-const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 7);
+const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 2);
+const DRY_RUN = /^(1|true|yes)$/i.test(String(process.env.DRY_RUN || 'false').trim());
 
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL is required');
 if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
@@ -74,26 +75,63 @@ async function listPage(offset) {
 
 async function removePaths(paths) {
   if (!paths.length) return;
-  const url = `${SUPABASE_URL}/storage/v1/object/remove`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ prefixes: paths }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Remove failed (${res.status}): ${text.slice(0, 400)}`);
+  if (DRY_RUN) {
+    log(`DRY_RUN: would remove ${paths.length} object(s)`);
+    return;
   }
 
-  const data = await res.json().catch(() => ({}));
-  const count = Array.isArray(data) ? data.length : paths.length;
-  log(`Removed ${count} objects in batch`);
+  const attempts = [
+    {
+      label: 'POST /storage/v1/object/remove {prefixes}',
+      url: `${SUPABASE_URL}/storage/v1/object/remove`,
+      method: 'POST',
+      body: JSON.stringify({ prefixes: paths }),
+    },
+    {
+      label: 'POST /storage/v1/object/remove {bucketId,prefixes}',
+      url: `${SUPABASE_URL}/storage/v1/object/remove`,
+      method: 'POST',
+      body: JSON.stringify({ bucketId: SUPABASE_BUCKET, prefixes: paths }),
+    },
+    {
+      label: 'DELETE /storage/v1/object/{bucket} {prefixes}',
+      url: `${SUPABASE_URL}/storage/v1/object/${encodeURIComponent(SUPABASE_BUCKET)}`,
+      method: 'DELETE',
+      body: JSON.stringify({ prefixes: paths }),
+    },
+    {
+      label: 'DELETE /storage/v1/object/{bucket} [paths]',
+      url: `${SUPABASE_URL}/storage/v1/object/${encodeURIComponent(SUPABASE_BUCKET)}`,
+      method: 'DELETE',
+      body: JSON.stringify(paths),
+    },
+  ];
+
+  const errors = [];
+  for (const a of attempts) {
+    const res = await fetch(a.url, {
+      method: a.method,
+      headers,
+      body: a.body,
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const count = Array.isArray(data) ? data.length : paths.length;
+      log(`Removed ${count} objects in batch via ${a.label}`);
+      return;
+    }
+    const text = await res.text().catch(() => '');
+    errors.push(`${a.label} -> ${res.status}: ${text.slice(0, 220)}`);
+  }
+
+  throw new Error(`Remove failed for all API variants: ${errors.join(' | ')}`);
 }
 
 async function main() {
-  log(`Bucket=${SUPABASE_BUCKET} Prefix=${SUPABASE_PREFIX || '(root)'} Retention=${RETENTION_DAYS} day(s)`);
+  log(
+    `Bucket=${SUPABASE_BUCKET} Prefix=${SUPABASE_PREFIX || '(root)'} ` +
+    `Retention=${RETENTION_DAYS} day(s) DryRun=${DRY_RUN}`
+  );
 
   let offset = 0;
   let scanned = 0;

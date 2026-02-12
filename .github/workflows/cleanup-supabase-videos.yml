@@ -2,13 +2,17 @@ name: Cleanup Supabase Videos
 
 on:
   schedule:
-    - cron: '17 2 * * *'
+    - cron: '17 2 */2 * *'
   workflow_dispatch:
     inputs:
       retention_days:
         description: 'Delete rendered videos older than this many days'
         required: false
-        default: '7'
+        default: '2'
+      dry_run:
+        description: 'If true, only report what would be deleted'
+        required: false
+        default: 'true'
 
 jobs:
   cleanup:
@@ -30,5 +34,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET || 'videos' }}
           SUPABASE_PREFIX: ${{ vars.SUPABASE_VIDEO_PREFIX || 'videos' }}
-          RETENTION_DAYS: ${{ github.event.inputs.retention_days || vars.VIDEO_RETENTION_DAYS || '7' }}
+          RETENTION_DAYS: ${{ github.event.inputs.retention_days || vars.VIDEO_RETENTION_DAYS || '2' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: node .github/scripts/cleanup-supabase-videos.mjs
