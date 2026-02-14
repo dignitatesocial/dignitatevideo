@@ -56,7 +56,20 @@ export const Root: React.FC = () => {
         height={1920}
         defaultProps={defaultProps}
         calculateMetadata={({ props }) => {
-          const duration = Math.ceil(props.audioDurationInSeconds * props.fps);
+          const sceneSeconds = Array.isArray((props as any).scenes)
+            ? (props as any).scenes.reduce((sum: number, s: any) => {
+                const sec = Number(s?.duration);
+                return sum + (Number.isFinite(sec) && sec > 0 ? sec : 0);
+              }, 0)
+            : 0;
+
+          // Default to scene durations (preferred), otherwise fall back to audio length.
+          const durationSeconds =
+            sceneSeconds > 0
+              ? sceneSeconds
+              : Math.max(0, Number((props as any).audioDurationInSeconds) || 0);
+
+          const duration = Math.ceil(durationSeconds * props.fps);
           return {
             durationInFrames: Math.max(duration, 30),
             fps: props.fps,

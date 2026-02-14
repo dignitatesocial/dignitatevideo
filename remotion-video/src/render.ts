@@ -3,6 +3,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { parseFile } from "music-metadata";
 
 interface RenderInput {
   clipUrls: string[];
@@ -62,14 +63,29 @@ async function downloadToFile(url: string, destPath: string): Promise<string> {
 }
 
 async function getAudioDuration(filePath: string): Promise<number> {
+  // Prefer real metadata duration; fallback to a rough estimate if parsing fails.
+  try {
+    const metadata = await parseFile(filePath, { duration: true });
+    const dur = Number(metadata?.format?.duration);
+    if (Number.isFinite(dur) && dur > 0) {
+      console.log(`Audio duration (metadata): ${dur.toFixed(2)}s`);
+      return dur;
+    }
+  } catch (e) {
+    console.log(
+      `Audio duration parse failed, falling back to estimate: ${String(
+        (e as any)?.message || e
+      ).slice(0, 180)}`
+    );
+  }
+
   // Estimate duration from file size for MP3 at 128kbps
-  // More accurate than nothing, and avoids needing ffprobe
   const stats = fs.statSync(filePath);
   const fileSizeBytes = stats.size;
   const bitrateKbps = 128;
   const durationSec = (fileSizeBytes * 8) / (bitrateKbps * 1000);
   console.log(
-    `Audio estimated duration: ${durationSec.toFixed(1)}s (${fileSizeBytes} bytes at ${bitrateKbps}kbps)`
+    `Audio duration (estimated): ${durationSec.toFixed(1)}s (${fileSizeBytes} bytes at ${bitrateKbps}kbps)`
   );
   return durationSec;
 }
@@ -272,6 +288,21 @@ async function main() {
     );
   }
 
+  // Prefer the explicit scene timeline length (e.g. 30s for 2 x 15s).
+  // Subtitles use this duration to distribute words; keep it aligned to the timeline.
+  const sceneTimelineSeconds = (input.scenes || []).reduce((sum, s) => {
+    const d = Number((s as any)?.duration || 0);
+    return sum + (Number.isFinite(d) && d > 0 ? d : 0);
+  }, 0);
+
+  const timelineSeconds =
+    sceneTimelineSeconds > 0
+      ? sceneTimelineSeconds
+      : (audioDuration > 0 ? audioDuration : remoteClipUrls.length * 5);
+
+  const subtitlesSeconds =
+    audioDuration > 0 ? Math.min(audioDuration, timelineSeconds) : timelineSeconds;
+
   // Build render props with local file paths
   const renderProps = {
     clipUrls: remoteClipUrls,
@@ -279,7 +310,7 @@ async function main() {
     scenes: input.scenes,
     title: input.title,
     fps: 30,
-    audioDurationInSeconds: audioDuration,
+    audioDurationInSeconds: subtitlesSeconds,
   };
 
   console.log("Bundling Remotion project...");
