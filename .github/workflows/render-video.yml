@@ -16,6 +16,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Init debug dir
+        run: |
+          mkdir -p /tmp/remotion-render
+          echo "run_id=${{ github.run_id }} sha=${{ github.sha }}" > /tmp/remotion-render/gha.txt
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
