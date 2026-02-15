@@ -398,8 +398,20 @@ async function generateClipsFromScenes(
   const basePool = normalizeUrlList(input.creatorImageUrls);
   const baseSingle = clean(input.creatorImageUrl);
 
-  const nanoUrl = "https://queue.fal.run/fal-ai/nano-banana-pro/edit";
-  const nanoModelPath = "fal-ai/nano-banana-pro";
+  // Primary: nano-banana-pro/edit (best quality).
+  // Fallback: nano-banana/edit (useful when the Pro app isn't enabled on the key/account).
+  const nanoModels = [
+    {
+      url: "https://queue.fal.run/fal-ai/nano-banana-pro/edit",
+      modelPath: "fal-ai/nano-banana-pro",
+      label: "nano-banana-pro",
+    },
+    {
+      url: "https://queue.fal.run/fal-ai/nano-banana/edit",
+      modelPath: "fal-ai/nano-banana",
+      label: "nano-banana",
+    },
+  ];
   const klingUrl = "https://queue.fal.run/fal-ai/kling-video/o3/standard/image-to-video";
 
   const pollIntervalMs = 4000;
@@ -427,26 +439,51 @@ async function generateClipsFromScenes(
       const duration = Number(s.duration) && Number(s.duration) > 0 ? Number(s.duration) : 15;
 
       console.log(`Scene ${i + 1}/${scenes.length}: generating start frame...`);
-      const sceneImageSubmit = await falPostJson(
-        nanoUrl,
-        {
-          prompt: sceneImagePrompt || "Photorealistic UK dementia-care documentary scene, vertical 9:16.",
-          image_urls: pool,
-          num_images: 1,
-          aspect_ratio: "9:16",
-          output_format: "png",
-          resolution: "1K",
-          safety_tolerance: "4",
-          limit_generations: true,
-        },
-        falKey
-      );
+      const sceneImageBody = {
+        prompt: sceneImagePrompt || "Photorealistic UK dementia-care documentary scene, vertical 9:16.",
+        image_urls: pool,
+        num_images: 1,
+        aspect_ratio: "9:16",
+        output_format: "png",
+        resolution: "1K",
+        safety_tolerance: "4",
+        limit_generations: true,
+      };
 
-      const sceneImageUrl = await resolveFalImageUrl(sceneImageSubmit, falKey, {
-        pollIntervalMs,
-        maxWaitMs,
-        modelPath: nanoModelPath,
-      });
+      let sceneImageUrl = "";
+      let lastErr: any = null;
+      for (const m of nanoModels) {
+        try {
+          console.log(`Scene ${i + 1}: using ${m.label} for start frame...`);
+          const sceneImageSubmit = await falPostJson(m.url, sceneImageBody, falKey);
+          sceneImageUrl = await resolveFalImageUrl(sceneImageSubmit, falKey, {
+            pollIntervalMs,
+            maxWaitMs,
+            modelPath: m.modelPath,
+          });
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          const msg = String(e?.message || e);
+          // If the Pro app isn't accessible, try the non-pro fallback.
+          if (m.label === "nano-banana-pro" && /(401|403)|Cannot access application/i.test(msg)) {
+            console.log(`Scene ${i + 1}: ${m.label} not accessible, falling back...`);
+            continue;
+          }
+          // For other failures (bad key, network, etc.), stop early.
+          throw e;
+        }
+      }
+      if (!sceneImageUrl) {
+        const hint =
+          "If you want Pro quality, ensure your GitHub Actions secret FAL_KEY is valid and has access to 'fal-ai/nano-banana-pro'.";
+        throw new Error(
+          `Failed to generate scene start frame. Last error: ${String(lastErr?.message || lastErr).slice(
+            0,
+            260
+          )}. ${hint}`
+        );
+      }
       console.log(`Scene ${i + 1}: start frame ready: ${sceneImageUrl}`);
 
       console.log(`Scene ${i + 1}/${scenes.length}: generating clip (${duration}s)...`);
