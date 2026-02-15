@@ -222,17 +222,19 @@ async function falPostJson(url: string, body: any, falKey: string): Promise<any>
 async function resolveFalClipUrl(
   req: any,
   falKey: string,
-  opts: { pollIntervalMs: number; maxWaitMs: number }
+  opts: { pollIntervalMs: number; maxWaitMs: number; modelPath?: string }
 ): Promise<string> {
   const requestId = getRequestId(req);
   const statusUrl = getStatusUrl(req);
   const responseUrl = getResponseUrl(req);
 
+  const modelPath = clean(opts.modelPath) || "fal-ai/kling-video";
+
   const fallbackStatusUrl = requestId
-    ? `https://queue.fal.run/fal-ai/kling-video/requests/${encodeURIComponent(requestId)}/status`
+    ? `https://queue.fal.run/${modelPath}/requests/${encodeURIComponent(requestId)}/status`
     : "";
   const fallbackResponseUrl = requestId
-    ? `https://queue.fal.run/fal-ai/kling-video/requests/${encodeURIComponent(requestId)}`
+    ? `https://queue.fal.run/${modelPath}/requests/${encodeURIComponent(requestId)}`
     : "";
 
   const started = Date.now();
@@ -444,7 +446,9 @@ async function generateClipsFromScenes(
       label: "nano-banana",
     },
   ];
-  const klingUrl = "https://queue.fal.run/fal-ai/kling-video/o3/standard/image-to-video";
+  // Kling v3 standard supports native 9:16 output. (O3 often does not expose aspect_ratio.)
+  const klingUrl = "https://queue.fal.run/fal-ai/kling-video/v3/standard/image-to-video";
+  const klingModelPath = "fal-ai/kling-video/v3/standard/image-to-video";
 
   const pollIntervalMs = 4000;
   const maxWaitMs = 22 * 60 * 1000;
@@ -522,16 +526,20 @@ async function generateClipsFromScenes(
       const clipSubmit = await falPostJson(
         klingUrl,
         {
-          image_url: sceneImageUrl,
+          start_image_url: sceneImageUrl,
           prompt: videoPrompt || "Photorealistic UK dementia-care documentary scene.",
-          duration,
           aspect_ratio: "9:16",
+          duration: String(duration),
           generate_audio: false,
         },
         falKey
       );
 
-      const clipUrl = await resolveFalClipUrl(clipSubmit, falKey, { pollIntervalMs, maxWaitMs });
+      const clipUrl = await resolveFalClipUrl(clipSubmit, falKey, {
+        pollIntervalMs,
+        maxWaitMs,
+        modelPath: klingModelPath,
+      });
       console.log(`Scene ${i + 1}: clip ready: ${clipUrl}`);
       results[i] = clipUrl;
     }
