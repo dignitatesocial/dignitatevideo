@@ -650,6 +650,14 @@ async function uploadToSupabase(
   return publicUrl;
 }
 
+function resolveN8nWebhookUrl(input: RenderInput | null): string {
+  // Don't let a blank/whitespace env var override a valid webhookUrl in the payload.
+  const env = String(process.env.N8N_WEBHOOK_URL ?? "").trim();
+  if (env) return env;
+  const fromPayload = String(input?.n8nWebhookUrl ?? "").trim();
+  return fromPayload;
+}
+
 async function main() {
   console.log("=== Dignitate Video Renderer ===");
 
@@ -790,7 +798,7 @@ async function main() {
   const videoUrl = await uploadToSupabase(outputPath, videoKey);
 
   // Callback to n8n webhook
-  const webhookUrl = String(process.env.N8N_WEBHOOK_URL || input.n8nWebhookUrl || "").trim();
+  const webhookUrl = resolveN8nWebhookUrl(input);
   if (webhookUrl) {
     console.log("Sending callback to n8n...");
     const callbackResponse = await fetch(webhookUrl, {
@@ -826,7 +834,7 @@ main().catch((err) => {
   } catch {
     parsedInput = null;
   }
-  const webhookUrl = String(process.env.N8N_WEBHOOK_URL || parsedInput?.n8nWebhookUrl || "").trim();
+  const webhookUrl = resolveN8nWebhookUrl(parsedInput);
   if (webhookUrl && parsedInput) {
     const input = parsedInput;
     fetch(webhookUrl, {
