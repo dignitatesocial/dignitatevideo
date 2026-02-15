@@ -102,13 +102,13 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 200,
+        paddingBottom: 170,
         opacity: blockOpacity,
       }}
     >
       <div
         style={{
-          backgroundColor: "rgba(0, 0, 0, 0.55)",
+          backgroundColor: "rgba(0, 0, 0, 0.60)",
           borderRadius: 16,
           padding: "18px 28px",
           maxWidth: "90%",
@@ -116,6 +116,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
           flexWrap: "wrap",
           justifyContent: "center",
           gap: "6px 10px",
+          border: "1px solid rgba(20, 184, 166, 0.12)",
         }}
       >
         {visibleWords.map((w, i) => {
@@ -129,14 +130,14 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
               style={{
                 fontFamily: "Inter, sans-serif",
                 fontWeight: isActive ? 800 : 600,
-                fontSize: isActive ? 52 : 46,
+                fontSize: isActive ? 50 : 44,
                 color: isActive
                   ? "#14b8a6"
                   : isPast
                     ? "rgba(255, 255, 255, 0.6)"
                     : "#ffffff",
                 textShadow: "2px 2px 6px rgba(0, 0, 0, 0.9)",
-                transform: isActive ? "scale(1.08)" : "scale(1)",
+                transform: isActive ? "scale(1.07)" : "scale(1)",
                 display: "inline-block",
                 lineHeight: 1.3,
               }}

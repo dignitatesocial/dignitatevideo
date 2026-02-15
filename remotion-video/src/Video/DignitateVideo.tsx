@@ -31,7 +31,7 @@ export const DignitateVideo: React.FC<VideoInputProps> = ({
   const hasSceneDurations = sceneFrames.some((f) => f > 1);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#1a1a2e" }}>
+    <AbsoluteFill style={{ backgroundColor: "#05060a" }}>
       {/* Layer 1: Video clips in sequence */}
       {scenes.map((scene, i) => {
         const clipUrl = clipUrls[i] || clipUrls[clipUrls.length - 1] || "";
@@ -56,7 +56,7 @@ export const DignitateVideo: React.FC<VideoInputProps> = ({
             durationInFrames={duration}
             name={`${scene.type}: ${scene.narration.substring(0, 30)}...`}
           >
-            <Scene clipUrl={clipUrl} />
+            <Scene clipUrl={clipUrl} sceneIndex={i} />
           </Sequence>
         );
       })}
