@@ -237,32 +237,48 @@ async function resolveFalClipUrl(
 
   const started = Date.now();
   const deadline = started + opts.maxWaitMs;
+  let lastQueuePos: number | null = null;
 
   while (Date.now() < deadline) {
+    let status: string = "";
     try {
       const sUrl = looksLikeUrl(statusUrl) ? statusUrl : fallbackStatusUrl;
       if (sUrl) {
         const statusJson = await falGetJson(sUrl, falKey);
-        const status = clean(
+        status = clean(
           statusJson?.status || statusJson?.data?.status || statusJson?.request_status || ""
         ).toUpperCase();
+        const qpRaw = (statusJson?.queue_position ?? statusJson?.data?.queue_position ?? null) as any;
+        const qp = qpRaw == null ? null : Number(qpRaw);
+        if (qp != null && Number.isFinite(qp) && qp !== lastQueuePos) {
+          lastQueuePos = qp;
+          console.log(`fal clip status: ${status || "UNKNOWN"} (queue_position=${qp})`);
+        }
         if (["FAILED", "ERROR", "CANCELLED"].includes(status)) {
           throw new Error(`fal clip request failed: status=${status}`);
         }
       }
     } catch (e) {
-      console.log(`fal status check warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+      // Status can be flaky; don't fail solely on status polling.
+      console.log(`fal clip status warning: ${String((e as any)?.message || e).slice(0, 160)}`);
     }
 
     try {
       const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
       if (rUrl) {
-        const resultJson = await falGetJson(rUrl, falKey);
-        const direct = pickFirstVideoUrl(resultJson) || pickFirstVideoUrl(req);
-        if (direct) return direct;
+        // Avoid hammering the result endpoint while still in queue.
+        if (!status || status === "COMPLETED") {
+          const resultJson = await falGetJson(rUrl, falKey);
+          const direct = pickFirstVideoUrl(resultJson) || pickFirstVideoUrl(req);
+          if (direct) return direct;
+        }
       }
     } catch (e) {
-      console.log(`fal result fetch warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+      const msg = String((e as any)?.message || e);
+      // fal returns 400 with "Request is still in progress" until the result is ready.
+      if (!/Request is still in progress/i.test(msg)) {
+        console.log(`fal clip result warning: ${msg.slice(0, 160)}`);
+      }
     }
 
     await new Promise((r) => setTimeout(r, opts.pollIntervalMs));
@@ -293,32 +309,48 @@ async function resolveFalImageUrl(
 
   const started = Date.now();
   const deadline = started + opts.maxWaitMs;
+  let lastQueuePos: number | null = null;
 
   while (Date.now() < deadline) {
-    try {
-      const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
-      if (rUrl) {
-        const resultJson = await falGetJson(rUrl, falKey);
-        const direct = pickFirstImageUrl(resultJson) || pickFirstImageUrl(req);
-        if (direct) return direct;
-      }
-    } catch (e) {
-      console.log(`fal image result fetch warning: ${String((e as any)?.message || e).slice(0, 160)}`);
-    }
-
+    let status: string = "";
     try {
       const sUrl = looksLikeUrl(statusUrl) ? statusUrl : fallbackStatusUrl;
       if (sUrl) {
         const statusJson = await falGetJson(sUrl, falKey);
-        const status = clean(
+        status = clean(
           statusJson?.status || statusJson?.data?.status || statusJson?.request_status || ""
         ).toUpperCase();
+        const qpRaw = (statusJson?.queue_position ?? statusJson?.data?.queue_position ?? null) as any;
+        const qp = qpRaw == null ? null : Number(qpRaw);
+        if (qp != null && Number.isFinite(qp) && qp !== lastQueuePos) {
+          lastQueuePos = qp;
+          console.log(`fal image status: ${status || "UNKNOWN"} (queue_position=${qp})`);
+        }
         if (["FAILED", "ERROR", "CANCELLED"].includes(status)) {
           throw new Error(`fal image request failed: status=${status}`);
         }
       }
     } catch (e) {
+      // Status can be flaky; don't fail solely on status polling.
       console.log(`fal image status warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+    }
+
+    try {
+      const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
+      if (rUrl) {
+        // Avoid hammering the result endpoint while still in queue.
+        if (!status || status === "COMPLETED") {
+          const resultJson = await falGetJson(rUrl, falKey);
+          const direct = pickFirstImageUrl(resultJson) || pickFirstImageUrl(req);
+          if (direct) return direct;
+        }
+      }
+    } catch (e) {
+      const msg = String((e as any)?.message || e);
+      // fal returns 400 with "Request is still in progress" until the result is ready.
+      if (!/Request is still in progress/i.test(msg)) {
+        console.log(`fal image result warning: ${msg.slice(0, 160)}`);
+      }
     }
 
     await new Promise((r) => setTimeout(r, opts.pollIntervalMs));
