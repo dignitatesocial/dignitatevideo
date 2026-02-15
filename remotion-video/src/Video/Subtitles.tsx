@@ -21,11 +21,29 @@ function buildWordTimeline(
 
   if (allWords.length === 0) return [];
 
-  const totalChars = allWords.reduce((sum, w) => sum + w.length, 0);
+  // Distribute timing by (approximate) spoken rhythm, not character count.
+  // Character-based timing makes long words appear too slow and short words too fast.
+  // This is still an approximation (no true phoneme alignment), but feels closer to TTS pace.
+  const weights = allWords.map((w) => {
+    const word = String(w || "");
+    const endsWithStrongPause = /[.!?]$/.test(word);
+    const endsWithSoftPause = /[,;:]$/.test(word);
+    const isLong = word.replace(/[^a-z0-9]/gi, "").length >= 9;
+    return (
+      1 +
+      (endsWithSoftPause ? 0.35 : 0) +
+      (endsWithStrongPause ? 0.8 : 0) +
+      (isLong ? 0.15 : 0)
+    );
+  });
+
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
   let currentTime = 0;
 
-  return allWords.map((word) => {
-    const wordDuration = (word.length / totalChars) * totalDurationSec;
+  return allWords.map((word, idx) => {
+    const weight = weights[idx] || 1;
+    const wordDuration =
+      totalWeight > 0 ? (weight / totalWeight) * totalDurationSec : 0;
     const entry: WordEntry = {
       word,
       startFrame: Math.round(currentTime * fps),
