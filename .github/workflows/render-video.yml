@@ -49,4 +49,5 @@ jobs:
         with:
           name: render-debug
           path: /tmp/remotion-render/
+          if-no-files-found: warn
           retention-days: 1

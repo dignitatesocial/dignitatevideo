@@ -661,6 +661,11 @@ function resolveN8nWebhookUrl(input: RenderInput | null): string {
 async function main() {
   console.log("=== Dignitate Video Renderer ===");
 
+  // Create temp directory early so GitHub Actions can always upload a debug artifact,
+  // even if we fail before bundling/rendering (e.g. missing secrets).
+  const tmpDir = "/tmp/remotion-render";
+  fs.mkdirSync(tmpDir, { recursive: true });
+
   // Parse input props from environment
   const rawInput = process.env.INPUT_PROPS;
   if (!rawInput) {
@@ -672,6 +677,39 @@ async function main() {
   console.log(`Clips: ${input.clipUrls.length}`);
   console.log(`Scenes: ${input.scenes.length}`);
 
+  // Lightweight debug snapshot (no secret values).
+  try {
+    const dbg = {
+      title: input.title,
+      chatId: input.chatId,
+      scenes: (input.scenes || []).map((s) => ({
+        index: (s as any)?.index,
+        type: (s as any)?.type,
+        duration: (s as any)?.duration,
+        hasSceneImagePrompt: Boolean(clean((s as any)?.sceneImagePrompt)),
+        hasVideoPrompt: Boolean(clean((s as any)?.videoPrompt)),
+      })),
+      hasClipUrls: Array.isArray(input.clipUrls) && input.clipUrls.length > 0,
+      hasClipRequests: Array.isArray(input.clipRequests) && input.clipRequests.length > 0,
+      hasScenes: Array.isArray(input.scenes) && input.scenes.length > 0,
+      hasAudioUrl: Boolean(clean((input as any)?.audioUrl)),
+      hasNarrationText: Boolean(clean((input as any)?.narrationText)),
+      hasCreatorImageUrls:
+        Array.isArray((input as any)?.creatorImageUrls) && (input as any)?.creatorImageUrls.length > 0,
+      env: {
+        hasFAL_KEY: Boolean(String(process.env.FAL_KEY || "").trim()),
+        hasELEVENLABS_API_KEY: Boolean(String(process.env.ELEVENLABS_API_KEY || "").trim()),
+        hasSUPABASE_URL: Boolean(String(process.env.SUPABASE_URL || "").trim()),
+        hasSUPABASE_SERVICE_ROLE_KEY: Boolean(String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()),
+        hasSUPABASE_BUCKET: Boolean(String(process.env.SUPABASE_BUCKET || "").trim()),
+        hasN8N_WEBHOOK_URL: Boolean(String(process.env.N8N_WEBHOOK_URL || "").trim()),
+      },
+    };
+    fs.writeFileSync(path.join(tmpDir, "debug-input.json"), JSON.stringify(dbg, null, 2));
+  } catch {
+    // best-effort only
+  }
+
   let remoteClipUrls = (input.clipUrls || [])
     .map((u) => String(u || "").trim())
     .filter((u) => /^https?:\/\//i.test(u));
@@ -682,6 +720,16 @@ async function main() {
 
   // If clips aren't provided at all, generate them from the prepared scene prompts.
   if (remoteClipUrls.length === 0 && (input.scenes || []).length > 0) {
+    // Make the "missing secret" failure explicit and actionable (happens early on GH Actions).
+    if (!String(process.env.FAL_KEY || "").trim()) {
+      throw new Error(
+        [
+          "FAL_KEY is missing.",
+          "This workflow generates scene images + clips inside GitHub Actions, so FAL_KEY must be set as a repository Actions secret:",
+          "Repo -> Settings -> Secrets and variables -> Actions -> New repository secret -> Name: FAL_KEY",
+        ].join(" ")
+      );
+    }
     remoteClipUrls = await generateClipsFromScenes(input);
   }
 
@@ -690,10 +738,6 @@ async function main() {
       "No valid clip URLs were provided (and no resolvable clipRequests were provided)."
     );
   }
-
-  // Create temp directory
-  const tmpDir = "/tmp/remotion-render";
-  fs.mkdirSync(tmpDir, { recursive: true });
 
   // Resolve audio source:
   // 1) Use provided audio URL if available.
@@ -825,6 +869,18 @@ async function main() {
 
 main().catch((err) => {
   console.error("Render failed:", err);
+
+  // Ensure tmp dir exists and write a short error note for artifact debugging.
+  try {
+    const tmpDir = "/tmp/remotion-render";
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "error.txt"),
+      String((err as any)?.stack || (err as any)?.message || err)
+    );
+  } catch {
+    // best-effort only
+  }
 
   // Send failure callback
   const rawInput = process.env.INPUT_PROPS;
