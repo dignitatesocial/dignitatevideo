@@ -7,7 +7,7 @@ on:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     concurrency:
       group: remotion-render-${{ github.event.client_payload.job.chatId || github.run_id }}
       cancel-in-progress: false
@@ -35,6 +35,7 @@ jobs:
         working-directory: remotion-video
         env:
           INPUT_PROPS: ${{ toJson(github.event.client_payload) }}
+          FAL_KEY: ${{ secrets.FAL_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
