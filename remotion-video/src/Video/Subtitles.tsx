@@ -97,28 +97,22 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
     extrapolateRight: "clamp",
   });
 
+  const fontFamily =
+    'Montserrat, "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
+
+  const baseShadow =
+    "0 3px 10px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.9)";
+
   return (
     <AbsoluteFill
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 170,
+        paddingBottom: 210,
         opacity: blockOpacity,
       }}
     >
-      <div
-        style={{
-          backgroundColor: "rgba(0, 0, 0, 0.60)",
-          borderRadius: 16,
-          padding: "18px 28px",
-          maxWidth: "90%",
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "center",
-          gap: "6px 10px",
-          border: "1px solid rgba(20, 184, 166, 0.12)",
-        }}
-      >
+      <div style={{ maxWidth: "92%", textAlign: "center" }}>
         {visibleWords.map((w, i) => {
           const absoluteIndex = groupStart + i;
           const isActive = absoluteIndex === currentWordIndex;
@@ -128,18 +122,18 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
             <span
               key={absoluteIndex}
               style={{
-                fontFamily: "Inter, sans-serif",
-                fontWeight: isActive ? 800 : 600,
-                fontSize: isActive ? 50 : 44,
-                color: isActive
-                  ? "#14b8a6"
-                  : isPast
-                    ? "rgba(255, 255, 255, 0.6)"
-                    : "#ffffff",
-                textShadow: "2px 2px 6px rgba(0, 0, 0, 0.9)",
-                transform: isActive ? "scale(1.07)" : "scale(1)",
+                fontFamily,
+                fontWeight: 900,
+                fontSize: 54,
+                color: isActive ? "#071012" : isPast ? "rgba(255,255,255,0.85)" : "#ffffff",
+                textShadow: isActive ? "none" : baseShadow,
+                backgroundColor: isActive ? "rgba(250, 204, 21, 0.98)" : "transparent",
+                borderRadius: isActive ? 14 : 0,
+                padding: isActive ? "8px 12px" : "0px 2px",
+                margin: "0px 6px",
+                transform: isActive ? "translateY(-2px)" : "translateY(0px)",
                 display: "inline-block",
-                lineHeight: 1.3,
+                lineHeight: 1.15,
               }}
             >
               {w.word}
