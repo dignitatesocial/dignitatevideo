@@ -77,6 +77,28 @@ function clean(s: unknown): string {
   return String(s ?? "").trim();
 }
 
+function hashSeed(str: string): number {
+  // Stable cross-run seed for deterministic-ish variation.
+  const s = clean(str);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function appendPrompt(base: string, tail: string): string {
+  const b = clean(base);
+  const t = clean(tail);
+  if (!b) return t;
+  if (!t) return b;
+  const lowerB = b.toLowerCase();
+  const lowerT = t.toLowerCase();
+  // Avoid runaway duplication when prompts already include the same hard-lock phrases.
+  if (lowerB.includes(lowerT)) return b;
+  return `${b}. ${t}`;
+}
+
 function looksLikeUrl(u: string): boolean {
   return /^https?:\/\//i.test(clean(u));
 }
@@ -222,47 +244,65 @@ async function falPostJson(url: string, body: any, falKey: string): Promise<any>
 async function resolveFalClipUrl(
   req: any,
   falKey: string,
-  opts: { pollIntervalMs: number; maxWaitMs: number }
+  opts: { pollIntervalMs: number; maxWaitMs: number; modelPath?: string }
 ): Promise<string> {
   const requestId = getRequestId(req);
   const statusUrl = getStatusUrl(req);
   const responseUrl = getResponseUrl(req);
 
+  const modelPath = clean(opts.modelPath) || "fal-ai/kling-video";
+
   const fallbackStatusUrl = requestId
-    ? `https://queue.fal.run/fal-ai/kling-video/requests/${encodeURIComponent(requestId)}/status`
+    ? `https://queue.fal.run/${modelPath}/requests/${encodeURIComponent(requestId)}/status`
     : "";
   const fallbackResponseUrl = requestId
-    ? `https://queue.fal.run/fal-ai/kling-video/requests/${encodeURIComponent(requestId)}`
+    ? `https://queue.fal.run/${modelPath}/requests/${encodeURIComponent(requestId)}`
     : "";
 
   const started = Date.now();
   const deadline = started + opts.maxWaitMs;
+  let lastQueuePos: number | null = null;
 
   while (Date.now() < deadline) {
+    let status: string = "";
     try {
       const sUrl = looksLikeUrl(statusUrl) ? statusUrl : fallbackStatusUrl;
       if (sUrl) {
         const statusJson = await falGetJson(sUrl, falKey);
-        const status = clean(
+        status = clean(
           statusJson?.status || statusJson?.data?.status || statusJson?.request_status || ""
         ).toUpperCase();
+        const qpRaw = (statusJson?.queue_position ?? statusJson?.data?.queue_position ?? null) as any;
+        const qp = qpRaw == null ? null : Number(qpRaw);
+        if (qp != null && Number.isFinite(qp) && qp !== lastQueuePos) {
+          lastQueuePos = qp;
+          console.log(`fal clip status: ${status || "UNKNOWN"} (queue_position=${qp})`);
+        }
         if (["FAILED", "ERROR", "CANCELLED"].includes(status)) {
           throw new Error(`fal clip request failed: status=${status}`);
         }
       }
     } catch (e) {
-      console.log(`fal status check warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+      // Status can be flaky; don't fail solely on status polling.
+      console.log(`fal clip status warning: ${String((e as any)?.message || e).slice(0, 160)}`);
     }
 
     try {
       const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
       if (rUrl) {
-        const resultJson = await falGetJson(rUrl, falKey);
-        const direct = pickFirstVideoUrl(resultJson) || pickFirstVideoUrl(req);
-        if (direct) return direct;
+        // Avoid hammering the result endpoint while still in queue.
+        if (!status || status === "COMPLETED") {
+          const resultJson = await falGetJson(rUrl, falKey);
+          const direct = pickFirstVideoUrl(resultJson) || pickFirstVideoUrl(req);
+          if (direct) return direct;
+        }
       }
     } catch (e) {
-      console.log(`fal result fetch warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+      const msg = String((e as any)?.message || e);
+      // fal returns 400 with "Request is still in progress" until the result is ready.
+      if (!/Request is still in progress/i.test(msg)) {
+        console.log(`fal clip result warning: ${msg.slice(0, 160)}`);
+      }
     }
 
     await new Promise((r) => setTimeout(r, opts.pollIntervalMs));
@@ -293,32 +333,48 @@ async function resolveFalImageUrl(
 
   const started = Date.now();
   const deadline = started + opts.maxWaitMs;
+  let lastQueuePos: number | null = null;
 
   while (Date.now() < deadline) {
-    try {
-      const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
-      if (rUrl) {
-        const resultJson = await falGetJson(rUrl, falKey);
-        const direct = pickFirstImageUrl(resultJson) || pickFirstImageUrl(req);
-        if (direct) return direct;
-      }
-    } catch (e) {
-      console.log(`fal image result fetch warning: ${String((e as any)?.message || e).slice(0, 160)}`);
-    }
-
+    let status: string = "";
     try {
       const sUrl = looksLikeUrl(statusUrl) ? statusUrl : fallbackStatusUrl;
       if (sUrl) {
         const statusJson = await falGetJson(sUrl, falKey);
-        const status = clean(
+        status = clean(
           statusJson?.status || statusJson?.data?.status || statusJson?.request_status || ""
         ).toUpperCase();
+        const qpRaw = (statusJson?.queue_position ?? statusJson?.data?.queue_position ?? null) as any;
+        const qp = qpRaw == null ? null : Number(qpRaw);
+        if (qp != null && Number.isFinite(qp) && qp !== lastQueuePos) {
+          lastQueuePos = qp;
+          console.log(`fal image status: ${status || "UNKNOWN"} (queue_position=${qp})`);
+        }
         if (["FAILED", "ERROR", "CANCELLED"].includes(status)) {
           throw new Error(`fal image request failed: status=${status}`);
         }
       }
     } catch (e) {
+      // Status can be flaky; don't fail solely on status polling.
       console.log(`fal image status warning: ${String((e as any)?.message || e).slice(0, 160)}`);
+    }
+
+    try {
+      const rUrl = looksLikeUrl(responseUrl) ? responseUrl : fallbackResponseUrl;
+      if (rUrl) {
+        // Avoid hammering the result endpoint while still in queue.
+        if (!status || status === "COMPLETED") {
+          const resultJson = await falGetJson(rUrl, falKey);
+          const direct = pickFirstImageUrl(resultJson) || pickFirstImageUrl(req);
+          if (direct) return direct;
+        }
+      }
+    } catch (e) {
+      const msg = String((e as any)?.message || e);
+      // fal returns 400 with "Request is still in progress" until the result is ready.
+      if (!/Request is still in progress/i.test(msg)) {
+        console.log(`fal image result warning: ${msg.slice(0, 160)}`);
+      }
     }
 
     await new Promise((r) => setTimeout(r, opts.pollIntervalMs));
@@ -398,9 +454,23 @@ async function generateClipsFromScenes(
   const basePool = normalizeUrlList(input.creatorImageUrls);
   const baseSingle = clean(input.creatorImageUrl);
 
-  const nanoUrl = "https://queue.fal.run/fal-ai/nano-banana-pro/edit";
-  const nanoModelPath = "fal-ai/nano-banana-pro";
-  const klingUrl = "https://queue.fal.run/fal-ai/kling-video/o3/standard/image-to-video";
+  // Primary: nano-banana-pro/edit (best quality).
+  // Fallback: nano-banana/edit (useful when the Pro app isn't enabled on the key/account).
+  const nanoModels = [
+    {
+      url: "https://queue.fal.run/fal-ai/nano-banana-pro/edit",
+      modelPath: "fal-ai/nano-banana-pro",
+      label: "nano-banana-pro",
+    },
+    {
+      url: "https://queue.fal.run/fal-ai/nano-banana/edit",
+      modelPath: "fal-ai/nano-banana",
+      label: "nano-banana",
+    },
+  ];
+  // Kling v3 standard supports native 9:16 output. (O3 often does not expose aspect_ratio.)
+  const klingUrl = "https://queue.fal.run/fal-ai/kling-video/v3/standard/image-to-video";
+  const klingModelPath = "fal-ai/kling-video/v3/standard/image-to-video";
 
   const pollIntervalMs = 4000;
   const maxWaitMs = 22 * 60 * 1000;
@@ -427,42 +497,89 @@ async function generateClipsFromScenes(
       const duration = Number(s.duration) && Number(s.duration) > 0 ? Number(s.duration) : 15;
 
       console.log(`Scene ${i + 1}/${scenes.length}: generating start frame...`);
-      const sceneImageSubmit = await falPostJson(
-        nanoUrl,
-        {
-          prompt: sceneImagePrompt || "Photorealistic UK dementia-care documentary scene, vertical 9:16.",
-          image_urls: pool,
-          num_images: 1,
-          aspect_ratio: "9:16",
-          output_format: "png",
-          resolution: "1K",
-          safety_tolerance: "4",
-          limit_generations: true,
-        },
-        falKey
-      );
 
-      const sceneImageUrl = await resolveFalImageUrl(sceneImageSubmit, falKey, {
-        pollIntervalMs,
-        maxWaitMs,
-        modelPath: nanoModelPath,
-      });
+      const imageHardLock =
+        "Vertical 9:16. Photorealistic UK documentary/editorial. Subject chest-up, centered, face in upper-middle (upper third), eyes sharp, hands visible if possible. Leave bottom 30% uncluttered for subtitles. No borders, no black bars, no letterboxing. No text, no captions, no logos, no watermark. No collage/split-screen.";
+
+      const videoHardLock =
+        "Vertical 9:16. Subtle realistic motion (blink, small head movement, gentle gesture). No borders, no black bars, no letterboxing. No text, no captions, no logos, no watermark. No collage/split-screen.";
+
+      const sceneSeed = Number.isFinite(Number(s.sceneSeed))
+        ? Number(s.sceneSeed)
+        : hashSeed(`${input.title}|${input.chatId}|scene:${i}`);
+
+      const sceneImageBody = {
+        prompt: appendPrompt(
+          sceneImagePrompt || "Photorealistic UK dementia-care documentary scene.",
+          imageHardLock
+        ),
+        image_urls: pool,
+        num_images: 1,
+        seed: sceneSeed,
+        aspect_ratio: "9:16",
+        output_format: "png",
+        resolution: "1K",
+        safety_tolerance: "4",
+        limit_generations: true,
+      };
+
+      let sceneImageUrl = "";
+      let lastErr: any = null;
+      for (const m of nanoModels) {
+        try {
+          console.log(`Scene ${i + 1}: using ${m.label} for start frame...`);
+          const sceneImageSubmit = await falPostJson(m.url, sceneImageBody, falKey);
+          sceneImageUrl = await resolveFalImageUrl(sceneImageSubmit, falKey, {
+            pollIntervalMs,
+            maxWaitMs,
+            modelPath: m.modelPath,
+          });
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          const msg = String(e?.message || e);
+          // If the Pro app isn't accessible, try the non-pro fallback.
+          if (m.label === "nano-banana-pro" && /(401|403)|Cannot access application/i.test(msg)) {
+            console.log(`Scene ${i + 1}: ${m.label} not accessible, falling back...`);
+            continue;
+          }
+          // For other failures (bad key, network, etc.), stop early.
+          throw e;
+        }
+      }
+      if (!sceneImageUrl) {
+        const hint =
+          "If you want Pro quality, ensure your GitHub Actions secret FAL_KEY is valid and has access to 'fal-ai/nano-banana-pro'.";
+        throw new Error(
+          `Failed to generate scene start frame. Last error: ${String(lastErr?.message || lastErr).slice(
+            0,
+            260
+          )}. ${hint}`
+        );
+      }
       console.log(`Scene ${i + 1}: start frame ready: ${sceneImageUrl}`);
 
       console.log(`Scene ${i + 1}/${scenes.length}: generating clip (${duration}s)...`);
       const clipSubmit = await falPostJson(
         klingUrl,
         {
-          image_url: sceneImageUrl,
-          prompt: videoPrompt || "Photorealistic UK dementia-care documentary scene.",
-          duration,
+          start_image_url: sceneImageUrl,
+          prompt: appendPrompt(
+            videoPrompt || "Photorealistic UK dementia-care documentary scene.",
+            videoHardLock
+          ),
           aspect_ratio: "9:16",
+          duration: String(duration),
           generate_audio: false,
         },
         falKey
       );
 
-      const clipUrl = await resolveFalClipUrl(clipSubmit, falKey, { pollIntervalMs, maxWaitMs });
+      const clipUrl = await resolveFalClipUrl(clipSubmit, falKey, {
+        pollIntervalMs,
+        maxWaitMs,
+        modelPath: klingModelPath,
+      });
       console.log(`Scene ${i + 1}: clip ready: ${clipUrl}`);
       results[i] = clipUrl;
     }
