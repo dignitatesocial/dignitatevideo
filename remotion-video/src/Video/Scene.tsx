@@ -27,8 +27,10 @@ export const Scene: React.FC<SceneProps> = ({ clipUrl, sceneIndex = 0 }) => {
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
 
-  // Gentle documentary "Ken Burns" motion for static-ish AI clips.
-  const zoom = interpolate(t, [0, 1], [1.06, 1.14]);
+  // Gentle documentary "Ken Burns" motion.
+  // Start slightly more zoomed-in to aggressively crop any embedded black bars
+  // that sometimes come back from gen video models.
+  const zoom = interpolate(t, [0, 1], [1.18, 1.26]);
   const panX = interpolate(
     t,
     [0, 1],
@@ -58,6 +60,7 @@ export const Scene: React.FC<SceneProps> = ({ clipUrl, sceneIndex = 0 }) => {
           objectFit: "cover",
           filter: "blur(28px) saturate(1.15) contrast(1.05)",
           transform: "scale(1.2)",
+          transformOrigin: "50% 50%",
           opacity: 0.85,
         }}
         muted
@@ -72,6 +75,7 @@ export const Scene: React.FC<SceneProps> = ({ clipUrl, sceneIndex = 0 }) => {
           width: "100%",
           height: "100%",
           objectFit: "cover",
+          transformOrigin: "50% 50%",
           transform: `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`,
         }}
         muted
