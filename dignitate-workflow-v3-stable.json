@@ -2338,7 +2338,7 @@
     },
     {
       "parameters": {
-        "keepOnlySet": true,
+        "keepOnlySet": false,
         "values": {
           "string": [
             {
