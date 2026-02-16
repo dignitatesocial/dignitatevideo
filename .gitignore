@@ -15,6 +15,6 @@ remotion-video/build/
 .env
 .env.*
 *.local
+dignitate-workflow-*.local.json
 tmp/
 /.tmp/
-
