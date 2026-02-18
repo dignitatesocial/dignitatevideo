@@ -36,6 +36,11 @@ jobs:
         working-directory: remotion-video
         run: npx remotion browser ensure
 
+      - name: Ensure ffmpeg (for 9:16 normalization)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Render video
         working-directory: remotion-video
         env:
