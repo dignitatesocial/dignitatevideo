@@ -1,12 +1,19 @@
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { spawn } from "child_process";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { parseFile } from "music-metadata";
 
 interface RenderInput {
   clipUrls: string[];
+  videoMode?: string;
+  targetDurationSec?: number;
+  renderConfig?: {
+    talkingHeadSingleImage?: boolean;
+    [key: string]: any;
+  };
   // Optional: when clipUrls are not ready yet, pass fal queue request ids/urls.
   // The GitHub Action can resolve these into mp4 URLs before rendering.
   clipRequests?: Array<{
@@ -64,6 +71,9 @@ function parseRenderInput(rawInput: string): RenderInput {
   return {
     ...candidate,
     clipUrls: Array.isArray(candidate?.clipUrls) ? candidate.clipUrls : [],
+    videoMode: clean(candidate?.videoMode || candidate?.video_mode),
+    targetDurationSec: Number(candidate?.targetDurationSec) || 0,
+    renderConfig: candidate?.renderConfig || {},
     clipRequests: Array.isArray(candidate?.clipRequests) ? candidate.clipRequests : [],
     creatorImageUrl: clean(candidate?.creatorImageUrl),
     creatorImageUrls: Array.isArray(candidate?.creatorImageUrls) ? candidate.creatorImageUrls : [],
@@ -71,6 +81,18 @@ function parseRenderInput(rawInput: string): RenderInput {
     title: String(candidate?.title || "Untitled Video"),
     chatId: String(candidate?.chatId || ""),
   } as RenderInput;
+}
+
+function isTalkingHeadInput(
+  input: RenderInput,
+  scenes: Array<any> = []
+): boolean {
+  const mode = clean(input.videoMode).toLowerCase();
+  const target = Number(input.targetDurationSec || 0);
+  const configFlag = Boolean((input.renderConfig as any)?.talkingHeadSingleImage);
+  const singleLongScene =
+    scenes.length === 1 && Number((scenes[0] as any)?.duration || 0) >= 25;
+  return mode === "talking_head" || target >= 30 || configFlag || singleLongScene;
 }
 
 function clean(s: unknown): string {
@@ -450,6 +472,7 @@ async function generateClipsFromScenes(
 
   const scenes = Array.isArray(input.scenes) ? input.scenes : [];
   if (scenes.length === 0) return [];
+  const singleSceneTalkingHead = isTalkingHeadInput(input, scenes);
 
   const basePool = normalizeUrlList(input.creatorImageUrls);
   const baseSingle = clean(input.creatorImageUrl);
@@ -559,6 +582,13 @@ async function generateClipsFromScenes(
       }
       console.log(`Scene ${i + 1}: start frame ready: ${sceneImageUrl}`);
 
+      // Talking-head mode: avoid Kling clip generation cost.
+      // We render the single generated portrait image as a 30s motion shot in Remotion.
+      if (singleSceneTalkingHead) {
+        results[i] = sceneImageUrl;
+        continue;
+      }
+
       console.log(`Scene ${i + 1}/${scenes.length}: generating clip (${duration}s)...`);
       const clipSubmit = await falPostJson(
         klingUrl,
@@ -586,7 +616,9 @@ async function generateClipsFromScenes(
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, scenes.length) }, () => worker()));
-  const done = results.filter((u) => looksLikeVideoUrl(u));
+  const done = results.filter((u) =>
+    singleSceneTalkingHead ? (looksLikeImageUrl(u) || looksLikeVideoUrl(u)) : looksLikeVideoUrl(u)
+  );
   if (done.length !== scenes.length) {
     throw new Error(`Only generated ${done.length}/${scenes.length} clips`);
   }
@@ -775,6 +807,216 @@ function resolveN8nWebhookUrl(input: RenderInput | null): string {
   return fromPayload;
 }
 
+function commandExists(cmd: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const p = spawn("bash", ["-lc", `command -v ${cmd} >/dev/null 2>&1`], {
+      stdio: "ignore",
+    });
+    p.on("close", (code) => resolve(code === 0));
+    p.on("error", () => resolve(false));
+  });
+}
+
+async function runCmd(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string } = {}
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    p.stdout.on("data", (d) => (stdout += d.toString("utf8")));
+    p.stderr.on("data", (d) => (stderr += d.toString("utf8")));
+    p.on("error", reject);
+    p.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
+  });
+}
+
+async function probeVideo(filePath: string): Promise<{
+  width: number;
+  height: number;
+  sar: string;
+  dar: string;
+  rotate: number;
+}> {
+  const ffprobeOk = await commandExists("ffprobe");
+  if (!ffprobeOk) {
+    return { width: 0, height: 0, sar: "", dar: "", rotate: 0 };
+  }
+
+  const res = await runCmd("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height,sample_aspect_ratio,display_aspect_ratio:stream_tags=rotate",
+    "-of",
+    "json",
+    filePath,
+  ]);
+  if (res.code !== 0) {
+    return { width: 0, height: 0, sar: "", dar: "", rotate: 0 };
+  }
+
+  try {
+    const j = JSON.parse(res.stdout || "{}");
+    const s = (j.streams && j.streams[0]) || {};
+    const width = Number(s.width || 0);
+    const height = Number(s.height || 0);
+    const sar = clean(s.sample_aspect_ratio || "");
+    const dar = clean(s.display_aspect_ratio || "");
+    const rotate = Number((s.tags && s.tags.rotate) || 0) || 0;
+    return { width, height, sar, dar, rotate };
+  } catch {
+    return { width: 0, height: 0, sar: "", dar: "", rotate: 0 };
+  }
+}
+
+function parseCropFromCropdetect(stderr: string): string {
+  const s = String(stderr || "");
+  // ffmpeg prints many crop=... values; the last is usually the most stable.
+  const matches = [...s.matchAll(/crop=(\d+:\d+:\d+:\d+)/g)];
+  const last = matches.length ? matches[matches.length - 1][1] : "";
+  return clean(last);
+}
+
+function parseCrop(crop: string): { w: number; h: number; x: number; y: number } | null {
+  const m = clean(crop).match(/^(\d+):(\d+):(\d+):(\d+)$/);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  const x = Number(m[3]);
+  const y = Number(m[4]);
+  if (![w, h, x, y].every((n) => Number.isFinite(n) && n >= 0)) return null;
+  return { w, h, x, y };
+}
+
+async function detectCrop(filePath: string): Promise<string> {
+  const ffmpegOk = await commandExists("ffmpeg");
+  if (!ffmpegOk) return "";
+
+  // Sample a few seconds early in the file to detect black bars reliably.
+  const res = await runCmd("ffmpeg", [
+    "-hide_banner",
+    "-ss",
+    "0.25",
+    "-t",
+    "2.5",
+    "-i",
+    filePath,
+    "-vf",
+    "cropdetect=24:16:0",
+    "-an",
+    "-f",
+    "null",
+    "-",
+  ]);
+  const crop = parseCropFromCropdetect(res.stderr);
+  return crop;
+}
+
+async function normalizeOutputVideo(
+  inputPath: string,
+  outPath: string,
+  tmpDir: string
+): Promise<string> {
+  const ffmpegOk = await commandExists("ffmpeg");
+  if (!ffmpegOk) {
+    console.log("ffmpeg not found; skipping output normalization.");
+    return inputPath;
+  }
+
+  const targetW = 1080;
+  const targetH = 1920;
+  const pre = await probeVideo(inputPath);
+  try {
+    fs.writeFileSync(
+      path.join(tmpDir, "probe-before.json"),
+      JSON.stringify(pre, null, 2)
+    );
+  } catch {
+    // best-effort
+  }
+
+  const cropRaw = await detectCrop(inputPath);
+  const cropParsed = parseCrop(cropRaw);
+  const cropIsMeaningful =
+    cropParsed &&
+    pre.width > 0 &&
+    pre.height > 0 &&
+    // Avoid over-cropping due to intentional vignettes/gradients.
+    (cropParsed.w <= pre.width - 80 || cropParsed.h <= pre.height - 80);
+  const crop = cropIsMeaningful ? cropRaw : "";
+  const cropPrefix = crop ? `crop=${crop},` : "";
+
+  // Force a true 9:16 raster with square pixels. If cropdetect found bars, remove them first.
+  const vf = `${cropPrefix}scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setsar=1`;
+
+  console.log(`Normalizing output MP4 to ${targetW}x${targetH} (vf="${vf}")...`);
+  const res = await runCmd("ffmpeg", [
+    "-y",
+    "-hide_banner",
+    "-i",
+    inputPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a?",
+    "-vf",
+    vf,
+    "-metadata:s:v:0",
+    "rotate=0",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    outPath,
+  ]);
+
+  if (res.code !== 0) {
+    console.log(
+      `ffmpeg normalization failed (code ${res.code}); uploading the raw Remotion output instead.`
+    );
+    try {
+      fs.writeFileSync(path.join(tmpDir, "ffmpeg-normalize.stderr.txt"), res.stderr);
+    } catch {
+      // best-effort
+    }
+    return inputPath;
+  }
+
+  const post = await probeVideo(outPath);
+  try {
+    fs.writeFileSync(
+      path.join(tmpDir, "probe-after.json"),
+      JSON.stringify(post, null, 2)
+    );
+  } catch {
+    // best-effort
+  }
+
+  console.log(
+    `Normalized video probe: ${post.width}x${post.height} sar=${post.sar || "?"} dar=${post.dar || "?"} rotate=${post.rotate || 0}`
+  );
+  return outPath;
+}
+
 async function main() {
   console.log("=== Dignitate Video Renderer ===");
 
@@ -790,15 +1032,33 @@ async function main() {
   }
 
   const input: RenderInput = parseRenderInput(rawInput);
+  const talkingHeadMode = isTalkingHeadInput(input, Array.isArray(input.scenes) ? input.scenes : []);
+  if (talkingHeadMode && Array.isArray(input.scenes) && input.scenes.length > 0) {
+    // Hard guarantee: talking-head is a single-scene 30s render.
+    const s0: any = input.scenes[0] || {};
+    input.scenes = [
+      {
+        ...s0,
+        type: "hook",
+        index: 0,
+        duration: 30,
+      },
+    ];
+  }
+
   console.log(`Title: ${input.title}`);
   console.log(`Clips: ${input.clipUrls.length}`);
   console.log(`Scenes: ${input.scenes.length}`);
+  console.log(`Video mode: ${clean(input.videoMode) || "kling_multiclip"}`);
 
   // Lightweight debug snapshot (no secret values).
   try {
     const dbg = {
       title: input.title,
       chatId: input.chatId,
+      videoMode: clean(input.videoMode),
+      targetDurationSec: Number(input.targetDurationSec || 0),
+      talkingHeadMode,
       scenes: (input.scenes || []).map((s) => ({
         index: (s as any)?.index,
         type: (s as any)?.type,
@@ -901,10 +1161,14 @@ async function main() {
     return sum + (Number.isFinite(d) && d > 0 ? d : 0);
   }, 0);
 
-  const timelineSeconds =
+  let timelineSeconds =
     sceneTimelineSeconds > 0
       ? sceneTimelineSeconds
       : (audioDuration > 0 ? audioDuration : remoteClipUrls.length * 5);
+
+  if (talkingHeadMode) {
+    timelineSeconds = Math.max(30, timelineSeconds);
+  }
 
   const subtitlesSeconds =
     audioDuration > 0 ? Math.min(audioDuration, timelineSeconds) : timelineSeconds;
@@ -954,9 +1218,19 @@ async function main() {
 
   console.log("Render complete!");
 
+  // Some players (and Telegram previews) can display unexpected padding if the MP4 has
+  // non-square pixels, rotation metadata, or embedded letterboxing. Normalize to true 9:16.
+  const normalizedPath = await normalizeOutputVideo(
+    outputPath,
+    path.join(tmpDir, "output-vertical.mp4"),
+    tmpDir
+  );
+
   // Upload to Supabase Storage
-  const videoKey = `videos/${Date.now()}-${input.title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.mp4`;
-  const videoUrl = await uploadToSupabase(outputPath, videoKey);
+  const videoKey = `videos/${Date.now()}-${input.title
+    .replace(/[^a-z0-9]/gi, "-")
+    .toLowerCase()}.mp4`;
+  const videoUrl = await uploadToSupabase(normalizedPath, videoKey);
 
   // Callback to n8n webhook
   const webhookUrl = resolveN8nWebhookUrl(input);

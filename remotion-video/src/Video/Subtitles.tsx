@@ -8,6 +8,12 @@ interface WordEntry {
   endFrame: number;
 }
 
+interface CaptionGroup {
+  words: WordEntry[];
+  startFrame: number;
+  endFrame: number;
+}
+
 function buildWordTimeline(
   scenes: SceneData[],
   totalDurationSec: number,
@@ -54,6 +60,67 @@ function buildWordTimeline(
   });
 }
 
+function normalizeWord(word: string): string {
+  const w = String(word || "").trim();
+  // Keep punctuation, but avoid rendering weird whitespace/newlines.
+  return w.replace(/\s+/g, " ");
+}
+
+function estimateLineLen(words: string[]): number {
+  // Roughly count visible chars. It's not perfect, but good enough for chunking.
+  return words.join(" ").replace(/\s+/g, " ").trim().length;
+}
+
+function buildCaptionGroups(
+  timeline: WordEntry[],
+  opts: { maxWords: number; maxChars: number }
+): CaptionGroup[] {
+  const maxWords = Math.max(1, Math.floor(opts.maxWords));
+  const maxChars = Math.max(10, Math.floor(opts.maxChars));
+
+  const groups: CaptionGroup[] = [];
+  let cur: WordEntry[] = [];
+
+  const flush = () => {
+    if (!cur.length) return;
+    groups.push({
+      words: cur,
+      startFrame: cur[0].startFrame,
+      endFrame: cur[cur.length - 1].endFrame,
+    });
+    cur = [];
+  };
+
+  for (const entry of timeline) {
+    const word = normalizeWord(entry.word);
+    const testWords = [...cur.map((w) => normalizeWord(w.word)), word];
+    const wouldExceedWords = cur.length + 1 > maxWords;
+    const wouldExceedChars = estimateLineLen(testWords) > maxChars;
+
+    if (cur.length && (wouldExceedWords || wouldExceedChars)) {
+      flush();
+    }
+
+    cur.push({ ...entry, word });
+
+    const strongPause = /[.!?]$/.test(word);
+    const softPause = /[,;:]$/.test(word);
+
+    // Prefer cutting on punctuation so captions feel phrase-based.
+    if (strongPause) {
+      flush();
+      continue;
+    }
+    if (softPause && cur.length >= Math.max(3, Math.floor(maxWords * 0.6))) {
+      flush();
+      continue;
+    }
+  }
+  flush();
+
+  return groups;
+}
+
 interface SubtitlesProps {
   scenes: SceneData[];
   audioDurationInSeconds: number;
@@ -74,6 +141,11 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
 
   if (timeline.length === 0) return null;
 
+  const groups = useMemo(() => {
+    // TikTok-style: short, punchy chunks.
+    return buildCaptionGroups(timeline, { maxWords: 6, maxChars: 28 });
+  }, [timeline]);
+
   // Find current word index
   let currentWordIndex = timeline.findIndex(
     (w) => frame >= w.startFrame && frame < w.endFrame
@@ -85,12 +157,26 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
     if (currentWordIndex === -1) currentWordIndex = timeline.length - 1;
   }
 
-  // Show a rolling window of words
-  const WINDOW_BEFORE = 3;
-  const WINDOW_AFTER = 4;
-  const groupStart = Math.max(0, currentWordIndex - WINDOW_BEFORE);
-  const groupEnd = Math.min(timeline.length, currentWordIndex + WINDOW_AFTER + 1);
-  const visibleWords = timeline.slice(groupStart, groupEnd);
+  // Find active group
+  let groupIndex = groups.findIndex(
+    (g) => frame >= g.startFrame && frame < g.endFrame
+  );
+  if (groupIndex === -1) {
+    // Fallback: choose the next group that ends after now.
+    groupIndex = groups.findIndex((g) => frame < g.endFrame);
+    if (groupIndex === -1) groupIndex = Math.max(0, groups.length - 1);
+  }
+
+  const activeGroup = groups[groupIndex] || { words: [], startFrame: 0, endFrame: 1 };
+  const visibleWords = activeGroup.words;
+
+  let activeWordInGroup = visibleWords.findIndex(
+    (w) => frame >= w.startFrame && frame < w.endFrame
+  );
+  if (activeWordInGroup === -1) {
+    activeWordInGroup = visibleWords.findIndex((w) => frame < w.endFrame);
+    if (activeWordInGroup === -1) activeWordInGroup = Math.max(0, visibleWords.length - 1);
+  }
 
   // Fade in the entire subtitle block
   const blockOpacity = interpolate(frame, [0, 10], [0, 1], {
@@ -98,42 +184,55 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   });
 
   const fontFamily =
-    'Montserrat, "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
+    '"Montserrat", "Arial Black", Impact, system-ui, -apple-system, sans-serif';
 
-  const baseShadow =
-    "0 3px 10px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.9)";
+  // Classic TikTok/Shorts caption treatment: white fill with a thick black stroke.
+  // Chrome (Remotion renderer) supports WebkitTextStroke.
+  const strokeColor = "rgba(0,0,0,0.95)";
+  const baseShadow = "0 6px 18px rgba(0,0,0,0.55)";
+  const highlight = "#14b8a6";
 
   return (
     <AbsoluteFill
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 210,
+        padding: "0 80px 190px 80px",
         opacity: blockOpacity,
       }}
     >
-      <div style={{ maxWidth: "92%", textAlign: "center" }}>
+      <div style={{ width: "100%", maxWidth: 980, textAlign: "center" }}>
         {visibleWords.map((w, i) => {
-          const absoluteIndex = groupStart + i;
-          const isActive = absoluteIndex === currentWordIndex;
-          const isPast = absoluteIndex < currentWordIndex;
+          const isActive = i === activeWordInGroup;
+          const isPast = i < activeWordInGroup;
+
+          const pop = isActive
+            ? interpolate(
+                frame,
+                [w.startFrame, w.startFrame + 4, w.endFrame],
+                [1, 1.12, 1],
+                { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+              )
+            : 1;
 
           return (
             <span
-              key={absoluteIndex}
+              key={`${groupIndex}-${i}-${w.startFrame}`}
               style={{
                 fontFamily,
                 fontWeight: 900,
-                fontSize: 54,
-                color: isActive ? "#071012" : isPast ? "rgba(255,255,255,0.85)" : "#ffffff",
-                textShadow: isActive ? "none" : baseShadow,
-                backgroundColor: isActive ? "rgba(250, 204, 21, 0.98)" : "transparent",
-                borderRadius: isActive ? 14 : 0,
-                padding: isActive ? "8px 12px" : "0px 2px",
-                margin: "0px 6px",
-                transform: isActive ? "translateY(-2px)" : "translateY(0px)",
+                fontSize: 78,
+                letterSpacing: "-1px",
+                lineHeight: 1.05,
+                textTransform: "uppercase",
+                color: isActive ? highlight : "#ffffff",
+                WebkitTextStrokeWidth: 12,
+                WebkitTextStrokeColor: strokeColor,
+                textShadow: baseShadow,
+                margin: "0 10px",
                 display: "inline-block",
-                lineHeight: 1.15,
+                transform: `translateY(${isActive ? -2 : 0}px) scale(${pop})`,
+                opacity: isPast ? 0.98 : 1,
               }}
             >
               {w.word}

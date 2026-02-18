@@ -1,6 +1,7 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Img,
   OffthreadVideo,
   useCurrentFrame,
   useVideoConfig,
@@ -10,6 +11,16 @@ import {
 interface SceneProps {
   clipUrl: string;
   sceneIndex?: number;
+}
+
+function looksLikeImageUrl(url: string): boolean {
+  const u = String(url || "").toLowerCase().split("?")[0].split("#")[0];
+  return (
+    u.endsWith(".png") ||
+    u.endsWith(".jpg") ||
+    u.endsWith(".jpeg") ||
+    u.endsWith(".webp")
+  );
 }
 
 export const Scene: React.FC<SceneProps> = ({ clipUrl, sceneIndex = 0 }) => {
@@ -47,39 +58,73 @@ export const Scene: React.FC<SceneProps> = ({ clipUrl, sceneIndex = 0 }) => {
     );
   }
 
+  const isImage = looksLikeImageUrl(clipUrl);
+
   return (
     <AbsoluteFill style={{ opacity }}>
       {/* Layer 1: blurred full-bleed background to avoid any letterboxing-looking areas */}
-      <OffthreadVideo
-        src={clipUrl}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          filter: "blur(28px) saturate(1.15) contrast(1.05)",
-          transform: "scale(1.2)",
-          transformOrigin: "50% 50%",
-          opacity: 0.85,
-        }}
-        muted
-      />
+      {isImage ? (
+        <Img
+          src={clipUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "blur(28px) saturate(1.15) contrast(1.05)",
+            transform: "scale(1.2)",
+            transformOrigin: "50% 50%",
+            opacity: 0.85,
+          }}
+        />
+      ) : (
+        <OffthreadVideo
+          src={clipUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "blur(28px) saturate(1.15) contrast(1.05)",
+            transform: "scale(1.2)",
+            transformOrigin: "50% 50%",
+            opacity: 0.85,
+          }}
+          muted
+        />
+      )}
 
       {/* Layer 2: main clip, full-bleed cover + motion */}
-      <OffthreadVideo
-        src={clipUrl}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transformOrigin: "50% 50%",
-          transform: `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`,
-        }}
-        muted
-      />
+      {isImage ? (
+        <Img
+          src={clipUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            transformOrigin: "50% 50%",
+            transform: `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`,
+          }}
+        />
+      ) : (
+        <OffthreadVideo
+          src={clipUrl}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            transformOrigin: "50% 50%",
+            transform: `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`,
+          }}
+          muted
+        />
+      )}
 
       {/* Layer 3: subtle vignette + top/bottom readability gradients */}
       <AbsoluteFill
