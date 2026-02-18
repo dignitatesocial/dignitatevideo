@@ -90,9 +90,12 @@ function isTalkingHeadInput(
   const mode = clean(input.videoMode).toLowerCase();
   const target = Number(input.targetDurationSec || 0);
   const configFlag = Boolean((input.renderConfig as any)?.talkingHeadSingleImage);
+  // Safety net: this workflow's multi-clip path should always have >1 scene.
+  // If we only received one scene, prefer the cheaper talking-head render path.
+  const singleScene = scenes.length === 1;
   const singleLongScene =
     scenes.length === 1 && Number((scenes[0] as any)?.duration || 0) >= 25;
-  return mode === "talking_head" || target >= 30 || configFlag || singleLongScene;
+  return mode === "talking_head" || target >= 30 || configFlag || singleLongScene || singleScene;
 }
 
 function clean(s: unknown): string {
