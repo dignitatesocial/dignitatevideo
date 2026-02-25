@@ -22,7 +22,8 @@
       "position": [
         -688,
         400
-      ]
+      ],
+      "disabled": true
     },
     {
       "parameters": {
@@ -2478,6 +2479,35 @@
         1080,
         840
       ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "openclaw",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "openclaw-webhook-0001",
+      "name": "OpenClaw Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1580,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// OpenClaw -> Telegram-shaped update adapter (hardcoded integration values)\nconst EXPECTED_SECRET = 'my_secure_secret_12345';\nconst FIELD_CHAT_ID = 'chatId';\nconst FIELD_TEXT = 'text';\nconst FIELD_CALLBACK_DATA = 'callbackData';\nconst FIELD_USER_ID = 'userId';\nconst FIELD_MESSAGE_ID = 'messageId';\n\nconst raw = $input.first().json || {};\nconst headers = raw.headers || raw.header || {};\nconst body = (raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body)) ? raw.body : raw;\nconst query = raw.query || {};\n\nfunction pickHeader(obj, keys) {\n  const src = obj && typeof obj === 'object' ? obj : {};\n  for (const k of keys) {\n    const exact = src[k];\n    if (exact != null && String(exact).trim()) return String(exact).trim();\n    const foundKey = Object.keys(src).find((x) => String(x).toLowerCase() === String(k).toLowerCase());\n    if (foundKey && src[foundKey] != null && String(src[foundKey]).trim()) return String(src[foundKey]).trim();\n  }\n  return '';\n}\n\nfunction clean(s) {\n  return String(s == null ? '' : s).trim();\n}\n\nfunction toNumOrString(v, fallback = null) {\n  if (v == null || v === '') return fallback;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : String(v);\n}\n\nconst providedSecret = pickHeader(headers, ['x-openclaw-secret', 'x-openclaw-signature']) || clean(query.secret);\nif (EXPECTED_SECRET && providedSecret !== EXPECTED_SECRET) {\n  throw new Error('Unauthorized OpenClaw webhook request');\n}\n\nconst chatIdRaw = body[FIELD_CHAT_ID] ?? body.chat_id ?? body.chat;\nconst userIdRaw = body[FIELD_USER_ID] ?? body.user_id ?? body.fromId;\nconst text = clean(body[FIELD_TEXT]);\nconst callbackData = clean(body[FIELD_CALLBACK_DATA]);\nconst messageIdRaw = body[FIELD_MESSAGE_ID] ?? body.message_id ?? body.updateMessageId;\nconst sourceMessageIdRaw = body.sourceMessageId ?? body.source_message_id ?? messageIdRaw;\nconst sourceMessageText = clean(body.sourceMessageText || body.source_message_text || body.originalMessageText || '');\nconst callbackQueryId = clean(body.callbackQueryId || body.callback_query_id || body.requestId || '');\nconst requestId = clean(body.requestId || body.request_id || '');\n\nconst chatId = toNumOrString(chatIdRaw, null);\nconst userId = toNumOrString(userIdRaw, chatId);\nconst messageId = toNumOrString(messageIdRaw, Date.now());\nconst sourceMessageId = toNumOrString(sourceMessageIdRaw, messageId);\n\nif (chatId == null) {\n  throw new Error('OpenClaw payload missing chatId');\n}\n\nconst nowSec = Math.floor(Date.now() / 1000);\n\nlet update;\nif (callbackData) {\n  update = {\n    update_id: nowSec,\n    callback_query: {\n      id: callbackQueryId || requestId || String(Date.now()),\n      from: { id: userId == null ? chatId : userId, is_bot: false },\n      data: callbackData,\n      message: {\n        message_id: sourceMessageId,\n        date: nowSec,\n        chat: { id: chatId, type: 'private' },\n        text: sourceMessageText || text || ''\n      }\n    }\n  };\n} else {\n  update = {\n    update_id: nowSec,\n    message: {\n      message_id: messageId,\n      date: nowSec,\n      chat: { id: chatId, type: 'private' },\n      from: { id: userId == null ? chatId : userId, is_bot: false },\n      text: text || ''\n    }\n  };\n}\n\nreturn [{\n  json: {\n    ...update,\n    openclaw: {\n      source: 'openclaw',\n      responseMode: 'sync',\n      botMode: 'openclaw_owns_telegram',\n      webhookPath: 'https://primary-production-cf993.up.railway.app/webhook/openclaw',\n      requestId,\n      rawPayload: body\n    }\n  }\n}];"
+      },
+      "id": "openclaw-normalize-0001",
+      "name": "OpenClaw Verify + Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        -320
+      ]
     }
   ],
   "connections": {
@@ -3606,6 +3636,28 @@
     "Trends Task Runner Fallback": {
       "main": [
         []
+      ]
+    },
+    "OpenClaw Webhook": {
+      "main": [
+        [
+          {
+            "node": "OpenClaw Verify + Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenClaw Verify + Normalize": {
+      "main": [
+        [
+          {
+            "node": "TEST_KEYS",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
