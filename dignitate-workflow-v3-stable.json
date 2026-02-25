@@ -1172,8 +1172,8 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $json.chatId || $('Load Chat History').first().json.chatId }}",
-        "text": "={{(() => {\n  const j = $json || {};\n  const detail = j.error?.message || j.error?.description || j.error?.details || j.body?.detail || j.detail || j.message || (typeof j.error === 'string' ? j.error : '') || 'An unexpected error occurred. Please try again.';\n  const slideInfo = (j.slideIndex !== undefined && j.totalSlides !== undefined) ? `\\nSlide: ${Number(j.slideIndex) + 1}/${j.totalSlides}` : '';\n  return `Error: Something went wrong.\\n\\n${String(detail).slice(0, 700)}${slideInfo}\\n\\nTry running the command again or use /status to check bot health.`;\n})()}}",
+        "chatId": "={{(() => {\n  const j = $json || {};\n  const candidates = [];\n  candidates.push(j.chatId);\n  candidates.push(j.openclaw?.rawPayload?.chatId);\n  candidates.push(j.message?.chat?.id);\n  candidates.push(j.callback_query?.message?.chat?.id);\n  candidates.push(j.callback_query?.from?.id);\n  try { candidates.push($('Load Chat History').first().json.chatId); } catch (e) {}\n  try { candidates.push($('Quick Parse Slash').first().json.chatId); } catch (e) {}\n  try {\n    const oc = $('OpenClaw Verify + Normalize').first().json || {};\n    candidates.push(oc.message?.chat?.id);\n    candidates.push(oc.callback_query?.message?.chat?.id);\n    candidates.push(oc.callback_query?.from?.id);\n    candidates.push(oc.openclaw?.rawPayload?.chatId);\n  } catch (e) {}\n  const val = candidates.find((v) => v !== undefined && v !== null && String(v).trim() !== '');\n  if (!val) throw new Error('No chatId available for Error Notification');\n  return String(val).trim();\n})()}}",
+        "text": "={{(() => {\n  const j = $json || {};\n  const errObj = j.error || {};\n  const detail =\n    errObj.message ||\n    errObj.description ||\n    errObj.details ||\n    j.body?.detail ||\n    j.detail ||\n    j.message ||\n    (typeof j.error === 'string' ? j.error : '') ||\n    'An unexpected error occurred. Please try again.';\n\n  const slideInfo = (j.slideIndex !== undefined && j.totalSlides !== undefined)\n    ? `\\nSlide: ${Number(j.slideIndex) + 1}/${j.totalSlides}`\n    : '';\n\n  const reqInfo = j.openclaw?.requestId ? `\\nRequest: ${String(j.openclaw.requestId).slice(0, 80)}` : '';\n  const msg = `Error: Something went wrong.\\n\\n${String(detail).replace(/[\\r\\n]+/g, ' ').slice(0, 650)}${slideInfo}${reqInfo}\\n\\nTry running the command again or use /status to check bot health.`;\n  return msg.slice(0, 1000);\n})()}}",
         "additionalFields": {
           "disableWebPagePreview": true
         }
@@ -1192,7 +1192,8 @@
       "position": [
         940,
         1100
-      ]
+      ],
+      "continueOnFail": true
     },
     {
       "parameters": {
