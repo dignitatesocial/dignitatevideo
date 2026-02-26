@@ -960,51 +960,105 @@ async function normalizeOutputVideo(
 
   // Force a true 9:16 raster with square pixels. If cropdetect found bars, remove them first.
   const vf = `${cropPrefix}scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setsar=1`;
+  const strictVf = `scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setsar=1`;
 
-  console.log(`Normalizing output MP4 to ${targetW}x${targetH} (vf="${vf}")...`);
-  const res = await runCmd("ffmpeg", [
-    "-y",
-    "-hide_banner",
-    "-i",
-    inputPath,
-    "-map",
-    "0:v:0",
-    "-map",
-    "0:a?",
-    "-vf",
-    vf,
-    "-metadata:s:v:0",
-    "rotate=0",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-movflags",
-    "+faststart",
-    outPath,
-  ]);
+  const runNormalizePass = async (
+    passName: string,
+    vfExpr: string,
+    input: string,
+    output: string,
+    extraArgs: string[] = []
+  ) => {
+    console.log(`Normalizing output MP4 (${passName}) to ${targetW}x${targetH} (vf="${vfExpr}")...`);
+    return await runCmd("ffmpeg", [
+      "-y",
+      "-hide_banner",
+      ...extraArgs,
+      "-i",
+      input,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      "-vf",
+      vfExpr,
+      "-metadata:s:v:0",
+      "rotate=0",
+      "-aspect",
+      "9:16",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      output,
+    ]);
+  };
 
-  if (res.code !== 0) {
-    console.log(
-      `ffmpeg normalization failed (code ${res.code}); uploading the raw Remotion output instead.`
-    );
+  const firstPass = await runNormalizePass("cropdetect", vf, inputPath, outPath);
+  if (firstPass.code !== 0) {
     try {
-      fs.writeFileSync(path.join(tmpDir, "ffmpeg-normalize.stderr.txt"), res.stderr);
+      fs.writeFileSync(path.join(tmpDir, "ffmpeg-normalize.stderr.txt"), firstPass.stderr);
     } catch {
       // best-effort
     }
-    return inputPath;
   }
 
-  const post = await probeVideo(outPath);
+  let post = firstPass.code === 0 ? await probeVideo(outPath) : { width: 0, height: 0, sar: "", dar: "", rotate: 0 };
+  const firstPassOk =
+    firstPass.code === 0 &&
+    post.width === targetW &&
+    post.height === targetH &&
+    (!post.rotate || post.rotate === 0);
+
+  if (!firstPassOk) {
+    const fallbackPath = outPath.replace(/\.mp4$/i, "-strict.mp4");
+    const secondPass = await runNormalizePass(
+      "strict",
+      strictVf,
+      inputPath,
+      fallbackPath,
+      ["-noautorotate"]
+    );
+
+    if (secondPass.code !== 0) {
+      try {
+        fs.writeFileSync(path.join(tmpDir, "ffmpeg-normalize-strict.stderr.txt"), secondPass.stderr);
+      } catch {
+        // best-effort
+      }
+      throw new Error(
+        `ffmpeg normalization failed in both passes. First pass code=${firstPass.code}, second pass code=${secondPass.code}`
+      );
+    }
+
+    post = await probeVideo(fallbackPath);
+    if (post.width !== targetW || post.height !== targetH || (post.rotate && post.rotate !== 0)) {
+      throw new Error(
+        `Normalized video raster invalid: got ${post.width}x${post.height} rotate=${post.rotate || 0}, expected ${targetW}x${targetH}`
+      );
+    }
+
+    try {
+      fs.copyFileSync(fallbackPath, outPath);
+    } catch (e) {
+      throw new Error(`Failed to finalize strict normalized output: ${String((e as any)?.message || e)}`);
+    }
+  }
+
+  if (post.width !== targetW || post.height !== targetH) {
+    throw new Error(`Output video raster is not ${targetW}x${targetH}: got ${post.width}x${post.height}`);
+  }
+
   try {
     fs.writeFileSync(
       path.join(tmpDir, "probe-after.json"),
