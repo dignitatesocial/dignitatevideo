@@ -803,11 +803,12 @@ async function uploadToSupabase(
 }
 
 function resolveN8nWebhookUrl(input: RenderInput | null): string {
-  // Don't let a blank/whitespace env var override a valid webhookUrl in the payload.
-  const env = String(process.env.N8N_WEBHOOK_URL ?? "").trim();
-  if (env) return env;
+  // Prefer the payload callback URL, then fall back to env.
+  // This prevents stale env configuration from overriding the workflow-dispatched URL.
   const fromPayload = String(input?.n8nWebhookUrl ?? "").trim();
-  return fromPayload;
+  if (fromPayload) return fromPayload;
+  const env = String(process.env.N8N_WEBHOOK_URL ?? "").trim();
+  return env;
 }
 
 function commandExists(cmd: string): Promise<boolean> {
