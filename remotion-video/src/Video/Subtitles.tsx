@@ -189,19 +189,32 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   // Classic TikTok/Shorts caption treatment: white fill with a thick black stroke.
   // Chrome (Remotion renderer) supports WebkitTextStroke.
   const strokeColor = "rgba(0,0,0,0.95)";
-  const baseShadow = "0 6px 18px rgba(0,0,0,0.55)";
-  const highlight = "#14b8a6";
+  const baseShadow = "0 8px 20px rgba(0,0,0,0.65)";
+  const highlight = "#18d4c4";
+  const blockBg = "rgba(0,0,0,0.65)";
+  const blockBorder = "rgba(255,255,255,0.12)";
 
   return (
     <AbsoluteFill
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        padding: "0 80px 190px 80px",
+        padding: "0 72px 210px 72px",
         opacity: blockOpacity,
       }}
     >
-      <div style={{ width: "100%", maxWidth: 980, textAlign: "center" }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 980,
+          textAlign: "center",
+          background: blockBg,
+          border: `1px solid ${blockBorder}`,
+          borderRadius: 22,
+          padding: "18px 22px",
+          backdropFilter: "blur(4px)",
+        }}
+      >
         {visibleWords.map((w, i) => {
           const isActive = i === activeWordInGroup;
           const isPast = i < activeWordInGroup;
@@ -210,7 +223,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
             ? interpolate(
                 frame,
                 [w.startFrame, w.startFrame + 4, w.endFrame],
-                [1, 1.12, 1],
+                [1, 1.08, 1],
                 { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
               )
             : 1;
@@ -221,17 +234,17 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
               style={{
                 fontFamily,
                 fontWeight: 900,
-                fontSize: 78,
-                letterSpacing: "-1px",
-                lineHeight: 1.05,
+                fontSize: 86,
+                letterSpacing: "-0.5px",
+                lineHeight: 1.08,
                 textTransform: "uppercase",
                 color: isActive ? highlight : "#ffffff",
-                WebkitTextStrokeWidth: 12,
+                WebkitTextStrokeWidth: 10,
                 WebkitTextStrokeColor: strokeColor,
                 textShadow: baseShadow,
                 margin: "0 10px",
                 display: "inline-block",
-                transform: `translateY(${isActive ? -2 : 0}px) scale(${pop})`,
+                transform: `translateY(${isActive ? -1 : 0}px) scale(${pop})`,
                 opacity: isPast ? 0.98 : 1,
               }}
             >
